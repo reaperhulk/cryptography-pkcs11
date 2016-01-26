@@ -1,0 +1,6 @@
+include LICENSE
+include LICENSE.APACHE
+include LICENSE.BSD
+include README.rst
+
+recursive-include docs *
