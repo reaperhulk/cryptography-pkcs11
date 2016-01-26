@@ -1,12 +1,6 @@
 Cryptography-pkcs11
 ===================
 
-.. image:: https://travis-ci.org/reaperhulk/cryptography-pkcs11.svg?branch=master
-    :target: https://travis-ci.org/reaperhulk/cryptography-pkcs11
-
-.. image:: https://codecov.io/github/reaperhulk/cryptography-pkcs11/coverage.svg?branch=master
-    :target: https://codecov.io/github/reaperhulk/cryptography-pkcs11?branch=master
-
 **At this time this should be considered experimental software and not ready for
 any sort of production use.**
 
