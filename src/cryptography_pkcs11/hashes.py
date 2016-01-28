@@ -25,18 +25,29 @@ class _HashContext(object):
                     _Reasons.UNSUPPORTED_HASH
                 )
 
+            ctx = self._backend._session_pool.acquire()
             mech = self._backend._ffi.new("CK_MECHANISM *")
             mech.mechanism = ckm
-            res = self._backend._lib.C_DigestInit(self._backend._session, mech)
+            res = self._backend._lib.C_DigestInit(ctx, mech)
             self._backend._check_error(res)
-            ctx = self._backend._session  # TODO: this...is a bad idea
 
         self._ctx = ctx
 
     algorithm = utils.read_only_property("_algorithm")
 
     def copy(self):
-        raise NotImplementedError
+        # TODO: size this buffer more appropriately and find a way to test
+        # that this works since SoftHSM doesn't support these functions.
+        buf = self._backend._ffi.new("unsigned char[]", 500)
+        buflen = self._backend._ffi.new("CK_ULONG *", len(buf))
+        res = self._backend._lib.C_GetOperationState(self._ctx, buf, buflen)
+        self._backend._check_error(res)
+        new_ctx = self._backend._session_pool.acquire()
+        res = self._backend._lib.C_SetOperationState(
+            new_ctx, buf, buflen[0], 0, 0
+        )
+        self._backend._check_error(res)
+        return _HashContext(self._backend, self._algorithm, new_ctx)
 
     def update(self, data):
         res = self._backend._lib.C_DigestUpdate(self._ctx, data, len(data))
@@ -53,5 +64,6 @@ class _HashContext(object):
             self._ctx, buf, buflen
         )
         self._backend._check_error(res)
+        self._backend._session_pool.release(self._ctx)
         assert buflen[0] == self.algorithm.digest_size
         return self._backend._ffi.buffer(buf, buflen[0])[:]
