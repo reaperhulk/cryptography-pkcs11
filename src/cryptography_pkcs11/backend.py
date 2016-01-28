@@ -4,15 +4,27 @@
 
 from __future__ import absolute_import, division, print_function
 
+import collections
 import os
 import threading
 
 from cryptography import utils
-from cryptography.hazmat.backends.interfaces import HashBackend
+from cryptography.hazmat.backends.interfaces import HashBackend, RSABackend
+from cryptography.hazmat.backends.openssl.backend import backend as obackend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric.padding import (
+    MGF1, OAEP, PKCS1v15, PSS
+)
 
+import six
 
 from cryptography_pkcs11.binding import Binding
 from cryptography_pkcs11.hashes import _HashContext
+from cryptography_pkcs11.rsa import _RSAPublicKey
+
+
+Attribute = collections.namedtuple("Attribute", ["type", "value"])
+CKAttributes = collections.namedtuple("CKAttributes", ["template", "cffivals"])
 
 
 class PKCS11SessionPool(object):
@@ -89,6 +101,7 @@ class PKCS11SessionPool(object):
 
 
 @utils.register_interface(HashBackend)
+@utils.register_interface(RSABackend)
 class Backend(object):
     """
     PKCS11 API wrapper.
@@ -114,11 +127,130 @@ class Backend(object):
         if return_code != 0:
             raise SystemError("Expected CKR_OK, got {0}".format(return_code))
 
+    def _build_attributes(self, attrs):
+        attributes = self._ffi.new("CK_ATTRIBUTE[{0}]".format(len(attrs)))
+        val_list = []
+        for index, attr in enumerate(attrs):
+            attributes[index].type = attr.type
+            if isinstance(attr.value, bool):
+                val_list.append(self._ffi.new("unsigned char *",
+                                int(attr.value)))
+                attributes[index].value_len = 1  # sizeof(char) is 1
+            elif isinstance(attr.value, int):
+                # second because bools are also considered ints
+                val_list.append(self._ffi.new("CK_ULONG *", attr.value))
+                attributes[index].value_len = 8
+            elif isinstance(attr.value, six.text_type):
+                buf = attr.value.encode('utf-8')
+                val_list.append(self._ffi.new("char []", buf))
+                attributes[index].value_len = len(buf)
+            elif isinstance(attr.value, six.binary_type):
+                val_list.append(self._ffi.new("char []", attr.value))
+                attributes[index].value_len = len(attr.value)
+            else:
+                raise TypeError("Unknown attribute type provided.")
+
+            attributes[index].value = val_list[-1]
+
+        return CKAttributes(attributes, val_list)
+
     def hash_supported(self, algorithm):
         return algorithm.name in self._hash_mapping
 
     def create_hash_ctx(self, algorithm):
         return _HashContext(self, algorithm)
+
+    def generate_rsa_private_key(self, public_exponent, key_size):
+        raise NotImplementedError
+        # # TODO: we need to be able to pass templates in. right now all keys
+        # # are generated as session only and exportable. And this is all
+        # # untested so far
+        # session = self._session_pool.acquire()
+        # public_handle = self._ffi.new("CK_OBJECT_HANDLE *")
+        # private_handle = self._ffi.new("CK_OBJECT_HANDLE *")
+        # mech = self._ffi.new("CK_MECHANISM *")
+        # mech.mechanism = self._binding.CKM_RSA_PKCS_KEY_PAIR_GEN
+        # pub_attrs = self._build_attributes([
+        #     Attribute(self._binding.CKA_PUBLIC_EXPONENT, public_exponent),
+        #     Attribute(self._binding.CKA_MODULUS_BITS, key_size),
+        #     Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
+        #     Attribute(self._binding.CKA_ENCRYPT, True),
+        #     Attribute(self._binding.CKA_DECRYPT, True),
+        #     Attribute(self._binding.CKA_SIGN, True),
+        #     Attribute(self._binding.CKA_VERIFY, True),
+        #     Attribute(self._binding.CKA_WRAP, True),
+        #     Attribute(self._binding.CKA_UNWRAP, True),
+        #     Attribute(self._binding.CKA_EXTRACTABLE, True)
+        # ])
+        # priv_attrs = self._build_attributes([
+        #     Attribute(self._binding.CKA_PUBLIC_EXPONENT, public_exponent),
+        #     Attribute(self._binding.CKA_MODULUS_BITS, key_size),
+        #     Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
+        #     Attribute(self._binding.CKA_PRIVATE, True),
+        #     Attribute(self._binding.CKA_SENSITIVE, True),
+        #     Attribute(self._binding.CKA_ENCRYPT, True),
+        #     Attribute(self._binding.CKA_DECRYPT, True),
+        #     Attribute(self._binding.CKA_SIGN, True),
+        #     Attribute(self._binding.CKA_VERIFY, True),
+        #     Attribute(self._binding.CKA_WRAP, True),
+        #     Attribute(self._binding.CKA_UNWRAP, True),
+        #     Attribute(self._binding.CKA_EXTRACTABLE, True)
+        # ])
+        # # TODO: remember that you can get the public key values from
+        # # CKA_MODULUS and CKA_PUBLIC_EXPONENT. but you can't perform
+        # # operations on them so we probably still need to think of these as
+        # # keypairs
+        # res = self._lib.C_GenerateKeyPair(
+        #     session, mech, pub_attrs.template, len(pub_attrs.template),
+        #     priv_attrs.template, len(priv_attrs.template), public_handle,
+        #     private_handle
+        # )
+        # self._check_error(res)
+
+    def rsa_padding_supported(self, padding):
+        if isinstance(padding, PKCS1v15):
+            return True
+        elif isinstance(padding, PSS) and isinstance(padding._mgf, MGF1):
+            return False
+        elif isinstance(padding, OAEP) and isinstance(padding._mgf, MGF1):
+            return True
+        else:
+            return False
+
+    def generate_rsa_parameters_supported(self, public_exponent, key_size):
+        # TODO
+        return False
+
+    def load_rsa_private_numbers(self, numbers):
+        return obackend.load_rsa_private_numbers(numbers)
+
+    def load_rsa_public_numbers(self, numbers):
+        attrs = self._build_attributes([
+            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
+            Attribute(self._binding.CKA_CLASS, self._binding.CKO_PUBLIC_KEY),
+            Attribute(self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
+            Attribute(
+                self._binding.CKA_MODULUS, utils.int_to_bytes(numbers.n)
+            ),
+            Attribute(
+                self._binding.CKA_PUBLIC_EXPONENT,
+                utils.int_to_bytes(numbers.e)
+            ),
+        ])
+
+        session = self._session_pool.acquire()
+        try:
+            # TODO: do we want to delete the object from the session when it
+            # is no longer in scope?
+            object_handle = self._ffi.new("CK_OBJECT_HANDLE *")
+            res = self._lib.C_CreateObject(
+                session, attrs.template, len(attrs.template), object_handle
+            )
+            self._check_error(res)
+        finally:
+            self._session_pool.release(session)
+
+        return _RSAPublicKey(self, object_handle[0])
 
 
 backend = Backend()
