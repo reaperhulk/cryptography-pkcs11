@@ -28,7 +28,7 @@ class _HashContext(object):
             ctx = self._backend._session_pool.acquire()
             mech = self._backend._ffi.new("CK_MECHANISM *")
             mech.mechanism = ckm
-            res = self._backend._lib.C_DigestInit(ctx, mech)
+            res = self._backend._lib.C_DigestInit(ctx[0], mech)
             self._backend._check_error(res)
 
         self._ctx = ctx
@@ -40,17 +40,17 @@ class _HashContext(object):
         # that this works since SoftHSM doesn't support these functions.
         buf = self._backend._ffi.new("unsigned char[]", 500)
         buflen = self._backend._ffi.new("CK_ULONG *", len(buf))
-        res = self._backend._lib.C_GetOperationState(self._ctx, buf, buflen)
+        res = self._backend._lib.C_GetOperationState(self._ctx[0], buf, buflen)
         self._backend._check_error(res)
         new_ctx = self._backend._session_pool.acquire()
         res = self._backend._lib.C_SetOperationState(
-            new_ctx, buf, buflen[0], 0, 0
+            new_ctx[0], buf, buflen[0], 0, 0
         )
         self._backend._check_error(res)
         return _HashContext(self._backend, self._algorithm, new_ctx)
 
     def update(self, data):
-        res = self._backend._lib.C_DigestUpdate(self._ctx, data, len(data))
+        res = self._backend._lib.C_DigestUpdate(self._ctx[0], data, len(data))
         self._backend._check_error(res)
 
     def finalize(self):
@@ -60,9 +60,7 @@ class _HashContext(object):
         buflen = self._backend._ffi.new(
             "CK_ULONG *", self.algorithm.digest_size
         )
-        res = self._backend._lib.C_DigestFinal(
-            self._ctx, buf, buflen
-        )
+        res = self._backend._lib.C_DigestFinal(self._ctx[0], buf, buflen)
         self._backend._check_error(res)
         self._backend._session_pool.release(self._ctx)
         assert buflen[0] == self.algorithm.digest_size

@@ -30,10 +30,13 @@ Then, if all is well you can import the backend and hash a thing.
 Issues
 ------
 
-* Right now only ``HashBackend`` is supported.
+* Right very few backends are supported. None fully.
+* Session management is atrocious. Deadlocks are going to happen. Nothing is
+  closed, and no objects are cleaned up.
+* Generating or loading a key with `CKA_TOKEN` True is not supported at all yet.
+* Assumptions about the ability to share key handles across sessions are made.
+  Whether this is true across all PKCS11 implementations is not clear.
 * When adding the ``pkcs11`` entry point for multibackend it is injected as the
   first element in the array. This is probably not desirable.
-* It only barely works for hashes and there are a lot of broken edge cases due to
-  PKCS11's love of session level state.
 
 .. _`cryptography`: https://cryptography.io/

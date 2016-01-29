@@ -10,7 +10,6 @@ import threading
 
 from cryptography import utils
 from cryptography.hazmat.backends.interfaces import HashBackend, RSABackend
-from cryptography.hazmat.backends.openssl.backend import backend as obackend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.padding import (
     MGF1, OAEP, PKCS1v15, PSS
@@ -20,7 +19,7 @@ import six
 
 from cryptography_pkcs11.binding import Binding
 from cryptography_pkcs11.hashes import _HashContext
-from cryptography_pkcs11.rsa import _RSAPublicKey
+from cryptography_pkcs11.rsa import _RSAPrivateKey, _RSAPublicKey
 
 
 Attribute = collections.namedtuple("Attribute", ["type", "value"])
@@ -63,21 +62,22 @@ class PKCS11SessionPool(object):
         # TODO: set a min/max pool size. This will also need an increment size
         for _ in range(pool_size):
             session = self._open_session(slot_id, flags)
-            self._login(session, password)
+            self._login(session[0], password)
             self._session.append(session)
 
     def _open_session(self, slot_id, flags):
         # TODO: use the flags that are passed
         session_ptr = self._backend._ffi.new("CK_SESSION_HANDLE *")
+        # TODO: revisit abusing cffi's gc to handle session management...
+        session_ptr = self._backend._ffi.gc(session_ptr, self.release)
         flags = (self._backend._binding.CKF_SERIAL_SESSION |
                  self._backend._binding.CKF_RW_SESSION)
-        # TODO: close the session via gc?
         res = self._backend._lib.C_OpenSession(
             slot_id, flags, self._backend._ffi.NULL, self._backend._ffi.NULL,
             session_ptr
         )
         self._backend._check_error(res)
-        return session_ptr[0]
+        return session_ptr
 
     def _login(self, session, password):
         res = self._backend._lib.C_Login(
@@ -93,11 +93,14 @@ class PKCS11SessionPool(object):
     def acquire(self):
         self._session_semaphore.acquire()
         # TODO: this is not a good way to do this.
-        return self._session.pop()
+        session = self._session.pop()
+        return session
 
     def release(self, session):
         self._session_semaphore.release()
-        return self._session.append(session)
+        new_sess = self._backend._ffi.new("CK_SESSION_HANDLE *", session[0])
+        new_sess = self._backend._ffi.gc(new_sess, self.release)
+        return self._session.append(new_sess)
 
 
 @utils.register_interface(HashBackend)
@@ -125,7 +128,9 @@ class Backend(object):
 
     def _check_error(self, return_code):
         if return_code != 0:
-            raise SystemError("Expected CKR_OK, got {0}".format(return_code))
+            raise SystemError(
+                "Expected CKR_OK, got {0}".format(hex(return_code))
+            )
 
     def _build_attributes(self, attrs):
         attributes = self._ffi.new("CK_ATTRIBUTE[{0}]".format(len(attrs)))
@@ -147,6 +152,11 @@ class Backend(object):
             elif isinstance(attr.value, six.binary_type):
                 val_list.append(self._ffi.new("char []", attr.value))
                 attributes[index].value_len = len(attr.value)
+            elif isinstance(attr.value, self._ffi.CData):
+                val_list.append(attr.value)
+                attributes[index].value_len = self._ffi.sizeof(
+                    attr.value
+                )
             else:
                 raise TypeError("Unknown attribute type provided.")
 
@@ -211,9 +221,9 @@ class Backend(object):
         if isinstance(padding, PKCS1v15):
             return True
         elif isinstance(padding, PSS) and isinstance(padding._mgf, MGF1):
-            return False
+            return isinstance(padding._mgf._algorithm, hashes.SHA1)
         elif isinstance(padding, OAEP) and isinstance(padding._mgf, MGF1):
-            return True
+            return isinstance(padding._mgf._algorithm, hashes.SHA1)
         else:
             return False
 
@@ -222,7 +232,54 @@ class Backend(object):
         return False
 
     def load_rsa_private_numbers(self, numbers):
-        return obackend.load_rsa_private_numbers(numbers)
+        attrs = self._build_attributes([
+            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
+            Attribute(self._binding.CKA_CLASS, self._binding.CKO_PRIVATE_KEY),
+            Attribute(self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
+            Attribute(
+                self._binding.CKA_MODULUS,
+                utils.int_to_bytes(numbers.public_numbers.n)
+            ),
+            Attribute(
+                self._binding.CKA_PUBLIC_EXPONENT,
+                utils.int_to_bytes(numbers.public_numbers.e)
+            ),
+            Attribute(
+                self._binding.CKA_PRIVATE_EXPONENT,
+                utils.int_to_bytes(numbers.d)
+            ),
+            Attribute(
+                self._binding.CKA_PRIME_1,
+                utils.int_to_bytes(numbers.p)
+            ),
+            Attribute(
+                self._binding.CKA_PRIME_2,
+                utils.int_to_bytes(numbers.q)
+            ),
+            Attribute(
+                self._binding.CKA_EXPONENT_1,
+                utils.int_to_bytes(numbers.dmp1)
+            ),
+            Attribute(
+                self._binding.CKA_EXPONENT_2,
+                utils.int_to_bytes(numbers.dmq1)
+            ),
+            Attribute(
+                self._binding.CKA_COEFFICIENT,
+                utils.int_to_bytes(numbers.iqmp)
+            ),
+        ])
+
+        session = self._session_pool.acquire()
+        # TODO: do we want to delete the object from the session when it
+        # is no longer in scope?
+        object_handle = self._ffi.new("CK_OBJECT_HANDLE *")
+        res = self._lib.C_CreateObject(
+            session[0], attrs.template, len(attrs.template), object_handle
+        )
+        self._check_error(res)
+
+        return _RSAPrivateKey(self, object_handle[0])
 
     def load_rsa_public_numbers(self, numbers):
         attrs = self._build_attributes([
@@ -239,16 +296,13 @@ class Backend(object):
         ])
 
         session = self._session_pool.acquire()
-        try:
-            # TODO: do we want to delete the object from the session when it
-            # is no longer in scope?
-            object_handle = self._ffi.new("CK_OBJECT_HANDLE *")
-            res = self._lib.C_CreateObject(
-                session, attrs.template, len(attrs.template), object_handle
-            )
-            self._check_error(res)
-        finally:
-            self._session_pool.release(session)
+        # TODO: do we want to delete the object from the session when it
+        # is no longer in scope?
+        object_handle = self._ffi.new("CK_OBJECT_HANDLE *")
+        res = self._lib.C_CreateObject(
+            session[0], attrs.template, len(attrs.template), object_handle
+        )
+        self._check_error(res)
 
         return _RSAPublicKey(self, object_handle[0])
 
