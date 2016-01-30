@@ -90,7 +90,11 @@ class PKCS11SessionPool(object):
             raise SystemError("Failed to login")
 
     def acquire(self):
-        self._session_semaphore.acquire()
+        if not self._session_semaphore.acquire(blocking=False):
+            # TODO: handle session exhaustion better. Not blocking is just
+            # to prevent deadlocks...
+            raise SystemError("Out of sessions")
+
         # TODO: this is not a good way to do this.
         session = self._session.pop()
         return session
