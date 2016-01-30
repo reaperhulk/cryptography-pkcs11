@@ -34,10 +34,10 @@ install:
 script:
   - ./.travis/run.sh
 
-# after_success:
-#   - |
-#     source ~/.venv/bin/activate
-#     codecov
+after_success:
+  - |
+    source ~/.venv/bin/activate
+    codecov
 
 notifications:
   email: false
