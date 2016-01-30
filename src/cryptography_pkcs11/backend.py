@@ -4,26 +4,25 @@
 
 from __future__ import absolute_import, division, print_function
 
-import collections
 import os
 import threading
 
 from cryptography import utils
-from cryptography.hazmat.backends.interfaces import HashBackend, RSABackend
+from cryptography.hazmat.backends.interfaces import (
+    CipherBackend, HashBackend, RSABackend
+)
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.padding import (
     MGF1, OAEP, PKCS1v15, PSS
 )
-
-import six
+from cryptography.hazmat.primitives.ciphers.algorithms import AES, TripleDES
+from cryptography.hazmat.primitives.ciphers.modes import CBC, CTR, ECB
 
 from cryptography_pkcs11.binding import Binding
+from cryptography_pkcs11.ciphers import _CipherContext
 from cryptography_pkcs11.hashes import _HashContext
+from cryptography_pkcs11.key_handle import Attribute, build_attributes
 from cryptography_pkcs11.rsa import _RSAPrivateKey, _RSAPublicKey
-
-
-Attribute = collections.namedtuple("Attribute", ["type", "value"])
-CKAttributes = collections.namedtuple("CKAttributes", ["template", "cffivals"])
 
 
 class PKCS11SessionPool(object):
@@ -103,6 +102,7 @@ class PKCS11SessionPool(object):
         return self._session.append(new_sess)
 
 
+@utils.register_interface(CipherBackend)
 @utils.register_interface(HashBackend)
 @utils.register_interface(RSABackend)
 class Backend(object):
@@ -133,34 +133,6 @@ class Backend(object):
                 "Expected CKR_OK, got {0}".format(hex(return_code))
             )
 
-    def _build_attributes(self, attrs):
-        attributes = self._ffi.new("CK_ATTRIBUTE[{0}]".format(len(attrs)))
-        val_list = []
-        for index, attr in enumerate(attrs):
-            attributes[index].type = attr.type
-            if isinstance(attr.value, bool):
-                val_list.append(self._ffi.new("unsigned char *",
-                                int(attr.value)))
-                attributes[index].value_len = 1  # sizeof(char) is 1
-            elif isinstance(attr.value, int):
-                # second because bools are also considered ints
-                val_list.append(self._ffi.new("CK_ULONG *", attr.value))
-                attributes[index].value_len = 8
-            elif isinstance(attr.value, six.binary_type):
-                val_list.append(self._ffi.new("char []", attr.value))
-                attributes[index].value_len = len(attr.value)
-            elif isinstance(attr.value, self._ffi.CData):
-                val_list.append(attr.value)
-                attributes[index].value_len = self._ffi.sizeof(
-                    attr.value
-                )
-            else:
-                raise TypeError("Unknown attribute type provided.")
-
-            attributes[index].value = val_list[-1]
-
-        return CKAttributes(attributes, val_list)
-
     def hash_supported(self, algorithm):
         return algorithm.name in self._hash_mapping
 
@@ -176,7 +148,7 @@ class Backend(object):
         private_handle = self._ffi.new("CK_OBJECT_HANDLE *")
         mech = self._ffi.new("CK_MECHANISM *")
         mech.mechanism = self._binding.CKM_RSA_PKCS_KEY_PAIR_GEN
-        pub_attrs = self._build_attributes([
+        pub_attrs = build_attributes([
             Attribute(
                 self._binding.CKA_PUBLIC_EXPONENT,
                 utils.int_to_bytes(public_exponent)
@@ -186,8 +158,8 @@ class Backend(object):
             Attribute(self._binding.CKA_ENCRYPT, True),
             Attribute(self._binding.CKA_VERIFY, True),
             Attribute(self._binding.CKA_EXTRACTABLE, True)
-        ])
-        priv_attrs = self._build_attributes([
+        ], self)
+        priv_attrs = build_attributes([
             Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
             Attribute(self._binding.CKA_PRIVATE, True),
             Attribute(self._binding.CKA_SENSITIVE, False),
@@ -196,7 +168,7 @@ class Backend(object):
             Attribute(self._binding.CKA_SIGN, True),
             Attribute(self._binding.CKA_VERIFY, True),
             Attribute(self._binding.CKA_EXTRACTABLE, True)
-        ])
+        ], self)
         # TODO: remember that you can get the public key values from
         # CKA_MODULUS and CKA_PUBLIC_EXPONENT. but you can't perform
         # operations on them so we probably still need to think of these as
@@ -225,7 +197,7 @@ class Backend(object):
         return False
 
     def load_rsa_private_numbers(self, numbers):
-        attrs = self._build_attributes([
+        attrs = build_attributes([
             Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
             Attribute(self._binding.CKA_CLASS, self._binding.CKO_PRIVATE_KEY),
             Attribute(self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
@@ -261,7 +233,7 @@ class Backend(object):
                 self._binding.CKA_COEFFICIENT,
                 utils.int_to_bytes(numbers.iqmp)
             ),
-        ])
+        ], self)
 
         session = self._session_pool.acquire()
         # TODO: do we want to delete the object from the session when it
@@ -275,7 +247,7 @@ class Backend(object):
         return _RSAPrivateKey(self, object_handle[0])
 
     def load_rsa_public_numbers(self, numbers):
-        attrs = self._build_attributes([
+        attrs = build_attributes([
             Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
             Attribute(self._binding.CKA_CLASS, self._binding.CKO_PUBLIC_KEY),
             Attribute(self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
@@ -286,7 +258,7 @@ class Backend(object):
                 self._binding.CKA_PUBLIC_EXPONENT,
                 utils.int_to_bytes(numbers.e)
             ),
-        ])
+        ], self)
 
         session = self._session_pool.acquire()
         # TODO: do we want to delete the object from the session when it
@@ -298,6 +270,29 @@ class Backend(object):
         self._check_error(res)
 
         return _RSAPublicKey(self, object_handle[0])
+
+    def cipher_supported(self, cipher, mode):
+        # TODO: softhsm only supports AES and 3DES with ECB/CBC
+        return (
+            isinstance(cipher, (AES, TripleDES)) and
+            isinstance(mode, (ECB, CBC))
+        )
+
+    def create_symmetric_encryption_ctx(self, cipher, mode):
+        operation = {
+            "init": self._lib.C_EncryptInit,
+            "update": self._lib.C_EncryptUpdate,
+            "final": self._lib.C_EncryptFinal
+        }
+        return _CipherContext(self, cipher, mode, operation)
+
+    def create_symmetric_decryption_ctx(self, cipher, mode):
+        operation = {
+            "init": self._lib.C_DecryptInit,
+            "update": self._lib.C_DecryptUpdate,
+            "final": self._lib.C_DecryptFinal
+        }
+        return _CipherContext(self, cipher, mode, operation)
 
 
 backend = Backend()

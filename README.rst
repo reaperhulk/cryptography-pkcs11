@@ -30,9 +30,8 @@ Then, if all is well you can import the backend and hash a thing.
 Issues
 ------
 
-* Right very few backends are supported. None fully.
-* Session management is atrocious. Deadlocks are going to happen. Nothing is
-  closed, and no objects are cleaned up.
+* Very few backends are supported. None fully.
+* Session management is still pretty terrible.
 * Generating or loading a key with `CKA_TOKEN` True is not supported at all yet.
 * Assumptions about the ability to share key handles across sessions are made.
   Whether this is true across all PKCS11 implementations is not clear.

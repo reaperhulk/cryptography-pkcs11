@@ -4,7 +4,6 @@
 
 from __future__ import absolute_import, division, print_function
 
-import collections
 import math
 
 from cryptography import utils
@@ -19,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.padding import (
     AsymmetricPadding, MGF1, OAEP, PKCS1v15, PSS
 )
 
-Attribute = collections.namedtuple("Attribute", ["type", "value"])
+from cryptography_pkcs11.key_handle import Attribute, build_attributes
 
 
 # TODO: stolen from openssl backend
@@ -110,11 +109,11 @@ class _RSAPublicKey(object):
     @property
     def key_size(self):
         # TODO: cache this. and also handle non-bye aligned keys
-        attrs = self._backend._build_attributes([
+        attrs = build_attributes([
             Attribute(
                 self._backend._binding.CKA_MODULUS, self._backend._ffi.NULL
             ),
-        ])
+        ], self._backend)
         session = self._backend._session_pool.acquire()
         res = self._backend._lib.C_GetAttributeValue(
             session[0], self._handle, attrs.template, len(attrs.template)
@@ -191,7 +190,7 @@ class _RSAPrivateKey(object):
         # it would require two calls to the PKCS11 layer. Right now it will
         # work with a single call as long as the key is 8192-bit or smaller and
         # the modulus isn't some ludicrous value.
-        attrs = self._backend._build_attributes([
+        attrs = build_attributes([
             Attribute(
                 self._backend._binding.CKA_MODULUS,
                 self._backend._ffi.new("unsigned char[]", 1024)
@@ -200,7 +199,7 @@ class _RSAPrivateKey(object):
                 self._backend._binding.CKA_PUBLIC_EXPONENT,
                 self._backend._ffi.new("unsigned char[]", 1024)
             ),
-        ])
+        ], self._backend)
         session = self._backend._session_pool.acquire()
         res = self._backend._lib.C_GetAttributeValue(
             session[0], self._handle, attrs.template, len(attrs.template)
@@ -227,11 +226,11 @@ class _RSAPrivateKey(object):
     @property
     def key_size(self):
         # TODO: cache this. and also handle non-bye aligned keys
-        attrs = self._backend._build_attributes([
+        attrs = build_attributes([
             Attribute(
                 self._backend._binding.CKA_MODULUS, self._backend._ffi.NULL
             ),
-        ])
+        ], self._backend)
         session = self._backend._session_pool.acquire()
         res = self._backend._lib.C_GetAttributeValue(
             session[0], self._handle, attrs.template, len(attrs.template)

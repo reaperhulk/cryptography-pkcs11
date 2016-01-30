@@ -90,10 +90,16 @@ CK_RV C_EncryptInit(CK_SESSION_HANDLE, CK_MECHANISM_PTR,
                     CK_OBJECT_HANDLE);
 CK_RV C_Encrypt(CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG,
                 CK_BYTE_PTR, CK_ULONG_PTR);
+CK_RV C_EncryptUpdate(CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG,
+                      CK_BYTE_PTR, CK_ULONG_PTR);
+CK_RV C_EncryptFinal(CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
 CK_RV C_DecryptInit(CK_SESSION_HANDLE, CK_MECHANISM_PTR,
                     CK_OBJECT_HANDLE);
 CK_RV C_Decrypt(CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR,
                 CK_ULONG_PTR);
+CK_RV C_DecryptUpdate(CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG,
+                      CK_BYTE_PTR, CK_ULONG_PTR);
+CK_RV C_DecryptFinal(CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR);
 CK_RV C_SignInit(CK_SESSION_HANDLE, CK_MECHANISM_PTR,
                  CK_OBJECT_HANDLE);
 CK_RV C_SignUpdate(CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG);
@@ -155,6 +161,8 @@ class Binding(object):
     CKK_DH = 2
     CKK_ECDSA = 3
     CKK_EC = 3
+    CKK_AES = 0x1f
+    CKK_DES3 = 0x15
 
     CKM_MD5 = 0x210
     CKM_SHA_1 = 0x220
@@ -177,6 +185,8 @@ class Binding(object):
     CKM_RSA_PKCS_KEY_PAIR_GEN = 0
     CKM_RSA_PKCS = 1
     CKM_RSA_PKCS_OAEP = 9
+    CKM_DES3_ECB = 0x132
+    CKM_DES3_CBC = 0x133
     CKM_AES_ECB = 0x1081
     CKM_AES_CBC = 0x1082
     CKM_AES_CTR = 0x1086
@@ -186,6 +196,7 @@ class Binding(object):
     CKO_CERTIFICATE = 1
     CKO_PUBLIC_KEY = 2
     CKO_PRIVATE_KEY = 3
+    CKO_SECRET_KEY = 4
 
     CKA_CLASS = 0
     CKA_TOKEN = 1
