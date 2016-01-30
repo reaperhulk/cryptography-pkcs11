@@ -29,8 +29,7 @@ def _get_rsa_pss_salt_length(pss, key_size, digest_size):
     if salt is MGF1.MAX_LENGTH or salt is PSS.MAX_LENGTH:
         # bit length - 1 per RFC 3447
         emlen = int(math.ceil((key_size - 1) / 8.0))
-        # emlen = (key_size + 7) // 8
-        salt_length = emlen - digest_size - 2 - 20  # TODO: -20 added
+        salt_length = emlen - digest_size - 2  # TODO: this still needs investigation. Should it actually be -3?
         assert salt_length >= 0
         return salt_length
     else:
@@ -121,6 +120,8 @@ class _RSAPublicKey(object):
             session[0], self._handle, attrs.template, len(attrs.template)
         )
         self._backend._check_error(res)
+        # TODO: the PKCS11 lib is allocating and returning a char * here.
+        # Are we responsible for freeing or is it on the stack?
         key_size = attrs.template[0].value_len
 
         return key_size * 8
@@ -308,6 +309,7 @@ def _sign_verify_init(backend, func, padding, key, algorithm):
         # TODO: probably not this dict.
         mech.mechanism = {
             "sha1": backend._binding.CKM_SHA1_RSA_PKCS,
+            "sha224": backend._binding.CKM_SHA224_RSA_PKCS,
             "sha256": backend._binding.CKM_SHA256_RSA_PKCS,
             "sha384": backend._binding.CKM_SHA384_RSA_PKCS,
             "sha512": backend._binding.CKM_SHA512_RSA_PKCS,
@@ -332,11 +334,18 @@ def _sign_verify_init(backend, func, padding, key, algorithm):
         params = backend._ffi.new("CK_RSA_PKCS_PSS_PARAMS *")
         # TODO: better than this hash mapping?
         params.hashAlg = backend._hash_mapping[algorithm.name]
-        params.mgf = backend._binding.CKG_MGF1_SHA1
+        params.mgf = {
+            "sha1": backend._binding.CKG_MGF1_SHA1,
+            "sha224": backend._binding.CKG_MGF1_SHA224,
+            "sha256": backend._binding.CKG_MGF1_SHA256,
+            "sha384": backend._binding.CKG_MGF1_SHA384,
+            "sha512": backend._binding.CKG_MGF1_SHA512,
+        }[padding._mgf._algorithm.name]
         params.salt_len = salt_length
         # TODO: probably not this hash
         mech.mechanism = {
             "sha1": backend._binding.CKM_SHA1_RSA_PKCS_PSS,
+            "sha224": backend._binding.CKM_SHA224_RSA_PKCS_PSS,
             "sha256": backend._binding.CKM_SHA256_RSA_PKCS_PSS,
             "sha384": backend._binding.CKM_SHA384_RSA_PKCS_PSS,
             "sha512": backend._binding.CKM_SHA512_RSA_PKCS_PSS
@@ -350,5 +359,7 @@ def _sign_verify_init(backend, func, padding, key, algorithm):
         )
     session = backend._session_pool.acquire()
     res = func(session[0], mech, key._handle)
-    backend._check_error(res)
+    if res != 0:
+        raise ValueError("Error code {} received from PKCS11".format(hex(res)))
+
     return session

@@ -138,8 +138,6 @@ class Binding(object):
     lib = lib
     ffi = ffi
 
-    # easiest place to get these is not the spec, but OpenSC's header!
-    # https://github.com/OpenSC/OpenSC/blob/master/src/pkcs11/pkcs11.h
     CKF_SERIAL_SESSION = 1 << 2
     CKF_RW_SESSION = 1 << 1
 
@@ -160,15 +158,18 @@ class Binding(object):
 
     CKM_MD5 = 0x210
     CKM_SHA_1 = 0x220
+    CKM_SHA224 = 0x255
     CKM_SHA256 = 0x250
     CKM_SHA384 = 0x260
     CKM_SHA512 = 0x270
 
     CKM_SHA1_RSA_PKCS = 6
+    CKM_SHA224_RSA_PKCS = 0x46
     CKM_SHA256_RSA_PKCS = 0x40
     CKM_SHA384_RSA_PKCS = 0x41
     CKM_SHA512_RSA_PKCS = 0x42
     CKM_SHA1_RSA_PKCS_PSS = 0xe
+    CKM_SHA224_RSA_PKCS_PSS = 0x47
     CKM_SHA256_RSA_PKCS_PSS = 0x43
     CKM_SHA384_RSA_PKCS_PSS = 0x44
     CKM_SHA512_RSA_PKCS_PSS = 0x45
@@ -178,6 +179,8 @@ class Binding(object):
     CKM_RSA_PKCS_OAEP = 9
     CKM_AES_ECB = 0x1081
     CKM_AES_CBC = 0x1082
+    CKM_AES_CTR = 0x1086
+    CKM_AES_GCM = 0x1087
 
     CKO_DATA = 0
     CKO_CERTIFICATE = 1

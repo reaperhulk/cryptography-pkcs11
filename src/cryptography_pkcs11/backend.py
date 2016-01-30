@@ -121,6 +121,7 @@ class Backend(object):
         self._hash_mapping = {
             "md5": self._binding.CKM_MD5,
             "sha1": self._binding.CKM_SHA_1,
+            "sha224": self._binding.CKM_SHA224,
             "sha256": self._binding.CKM_SHA256,
             "sha384": self._binding.CKM_SHA384,
             "sha512": self._binding.CKM_SHA512,
@@ -145,10 +146,6 @@ class Backend(object):
                 # second because bools are also considered ints
                 val_list.append(self._ffi.new("CK_ULONG *", attr.value))
                 attributes[index].value_len = 8
-            elif isinstance(attr.value, six.text_type):
-                buf = attr.value.encode('utf-8')
-                val_list.append(self._ffi.new("char []", buf))
-                attributes[index].value_len = len(buf)
             elif isinstance(attr.value, six.binary_type):
                 val_list.append(self._ffi.new("char []", attr.value))
                 attributes[index].value_len = len(attr.value)
@@ -171,57 +168,53 @@ class Backend(object):
         return _HashContext(self, algorithm)
 
     def generate_rsa_private_key(self, public_exponent, key_size):
-        raise NotImplementedError
-        # # TODO: we need to be able to pass templates in. right now all keys
-        # # are generated as session only and exportable. And this is all
-        # # untested so far
-        # session = self._session_pool.acquire()
-        # public_handle = self._ffi.new("CK_OBJECT_HANDLE *")
-        # private_handle = self._ffi.new("CK_OBJECT_HANDLE *")
-        # mech = self._ffi.new("CK_MECHANISM *")
-        # mech.mechanism = self._binding.CKM_RSA_PKCS_KEY_PAIR_GEN
-        # pub_attrs = self._build_attributes([
-        #     Attribute(self._binding.CKA_PUBLIC_EXPONENT, public_exponent),
-        #     Attribute(self._binding.CKA_MODULUS_BITS, key_size),
-        #     Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
-        #     Attribute(self._binding.CKA_ENCRYPT, True),
-        #     Attribute(self._binding.CKA_DECRYPT, True),
-        #     Attribute(self._binding.CKA_SIGN, True),
-        #     Attribute(self._binding.CKA_VERIFY, True),
-        #     Attribute(self._binding.CKA_WRAP, True),
-        #     Attribute(self._binding.CKA_UNWRAP, True),
-        #     Attribute(self._binding.CKA_EXTRACTABLE, True)
-        # ])
-        # priv_attrs = self._build_attributes([
-        #     Attribute(self._binding.CKA_PUBLIC_EXPONENT, public_exponent),
-        #     Attribute(self._binding.CKA_MODULUS_BITS, key_size),
-        #     Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
-        #     Attribute(self._binding.CKA_PRIVATE, True),
-        #     Attribute(self._binding.CKA_SENSITIVE, True),
-        #     Attribute(self._binding.CKA_ENCRYPT, True),
-        #     Attribute(self._binding.CKA_DECRYPT, True),
-        #     Attribute(self._binding.CKA_SIGN, True),
-        #     Attribute(self._binding.CKA_VERIFY, True),
-        #     Attribute(self._binding.CKA_WRAP, True),
-        #     Attribute(self._binding.CKA_UNWRAP, True),
-        #     Attribute(self._binding.CKA_EXTRACTABLE, True)
-        # ])
-        # # TODO: remember that you can get the public key values from
-        # # CKA_MODULUS and CKA_PUBLIC_EXPONENT. but you can't perform
-        # # operations on them so we probably still need to think of these as
-        # # keypairs
-        # res = self._lib.C_GenerateKeyPair(
-        #     session, mech, pub_attrs.template, len(pub_attrs.template),
-        #     priv_attrs.template, len(priv_attrs.template), public_handle,
-        #     private_handle
-        # )
-        # self._check_error(res)
+        # TODO: we need to be able to pass templates in. right now all keys
+        # are generated as session only and exportable. And this is all
+        # untested so far
+        session = self._session_pool.acquire()
+        public_handle = self._ffi.new("CK_OBJECT_HANDLE *")
+        private_handle = self._ffi.new("CK_OBJECT_HANDLE *")
+        mech = self._ffi.new("CK_MECHANISM *")
+        mech.mechanism = self._binding.CKM_RSA_PKCS_KEY_PAIR_GEN
+        pub_attrs = self._build_attributes([
+            Attribute(
+                self._binding.CKA_PUBLIC_EXPONENT,
+                utils.int_to_bytes(public_exponent)
+            ),
+            Attribute(self._binding.CKA_MODULUS_BITS, key_size),
+            Attribute(self._binding.CKA_TOKEN, True),  # don't persist it
+            Attribute(self._binding.CKA_ENCRYPT, True),
+            Attribute(self._binding.CKA_VERIFY, True),
+            Attribute(self._binding.CKA_EXTRACTABLE, True)
+        ])
+        priv_attrs = self._build_attributes([
+            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
+            Attribute(self._binding.CKA_PRIVATE, True),
+            Attribute(self._binding.CKA_SENSITIVE, False),
+            Attribute(self._binding.CKA_ENCRYPT, True),
+            Attribute(self._binding.CKA_DECRYPT, True),
+            Attribute(self._binding.CKA_SIGN, True),
+            Attribute(self._binding.CKA_VERIFY, True),
+            Attribute(self._binding.CKA_EXTRACTABLE, True)
+        ])
+        # TODO: remember that you can get the public key values from
+        # CKA_MODULUS and CKA_PUBLIC_EXPONENT. but you can't perform
+        # operations on them so we probably still need to think of these as
+        # keypairs
+        res = self._lib.C_GenerateKeyPair(
+            session[0], mech, pub_attrs.template, len(pub_attrs.template),
+            priv_attrs.template, len(priv_attrs.template), public_handle,
+            private_handle
+        )
+        self._check_error(res)
+
+        return _RSAPrivateKey(self, private_handle[0])
 
     def rsa_padding_supported(self, padding):
         if isinstance(padding, PKCS1v15):
             return True
         elif isinstance(padding, PSS) and isinstance(padding._mgf, MGF1):
-            return isinstance(padding._mgf._algorithm, hashes.SHA1)
+            return self.hash_supported(padding._mgf._algorithm)
         elif isinstance(padding, OAEP) and isinstance(padding._mgf, MGF1):
             return isinstance(padding._mgf._algorithm, hashes.SHA1)
         else:
