@@ -43,13 +43,11 @@ class _HMACContext(object):
                     _Reasons.UNSUPPORTED_HASH
                 )
 
-            session = self._backend._session_pool.acquire()
             mech = self._backend._ffi.new("CK_MECHANISM *")
             mech.mechanism = ckm
-            res = self._backend._lib.C_SignInit(
-                session[0], mech, self._key._handle
+            session = self._backend._session_pool.acquire_and_init(
+                backend, self._backend._lib.C_SignInit, mech, self._key._handle
             )
-            self._backend._check_error(res)
 
         self._session = session
 

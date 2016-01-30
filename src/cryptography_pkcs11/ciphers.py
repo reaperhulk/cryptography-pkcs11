@@ -41,15 +41,13 @@ class _CipherContext(object):
             iv_nonce = self._backend._ffi.NULL
             iv_nonce_len = 0
 
-        self._session = self._backend._session_pool.acquire()
         mech = self._backend._ffi.new("CK_MECHANISM *")
         mech.mechanism = self._get_mechanism(cipher, mode)
         mech.parameter = iv_nonce
         mech.parameter_len = iv_nonce_len
-        res = self._operation["init"](
-            self._session[0], mech, self._key_handle._handle
+        self._session = self._backend._session_pool.acquire_and_init(
+            backend, self._operation["init"], mech, self._key_handle._handle
         )
-        self._backend._check_error(res)
 
     def _get_mechanism(self, cipher, mode):
         return {

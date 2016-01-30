@@ -53,6 +53,10 @@ class PKCS11SessionPool(object):
         if password is None:
             raise ValueError("password must not be None")
 
+        self._slot_id = slot_id
+        self._password = password
+        self._flags = flags
+
         self._backend = backend
 
         # TODO: document that this semaphore is used to cause it to block
@@ -66,12 +70,9 @@ class PKCS11SessionPool(object):
             self._session.append(session)
 
     def _open_session(self, slot_id, flags):
-        # TODO: use the flags that are passed
         session_ptr = self._backend._ffi.new("CK_SESSION_HANDLE *")
         # TODO: revisit abusing cffi's gc to handle session management...
         session_ptr = self._backend._ffi.gc(session_ptr, self.release)
-        flags = (self._backend._binding.CKF_SERIAL_SESSION |
-                 self._backend._binding.CKF_RW_SESSION)
         res = self._backend._lib.C_OpenSession(
             slot_id, flags, self._backend._ffi.NULL, self._backend._ffi.NULL,
             session_ptr
@@ -100,11 +101,29 @@ class PKCS11SessionPool(object):
         session = self._session.pop()
         return session
 
+    def acquire_and_init(self, backend, func, *args):
+        session = self.acquire()
+        res = func(session[0], *args)
+        if res == 0x90:  # CKR_OPERATION_ACTIVE
+            self.destroy(session)
+            session = self.acquire()
+            res = func(session[0], *args)
+
+        backend._check_error(res)
+        return session
+
     def release(self, session):
-        self._session_semaphore.release()
         new_sess = self._backend._ffi.new("CK_SESSION_HANDLE *", session[0])
         new_sess = self._backend._ffi.gc(new_sess, self.release)
-        return self._session.append(new_sess)
+        self._session.append(new_sess)
+        self._session_semaphore.release()
+
+    def destroy(self, session):
+        # TODO: close the session being destroyed
+        new_session = self._open_session(self._slot_id, self._flags)
+        self._login(new_session[0], self._password)
+        self._session.append(new_session)
+        self._session_semaphore.release()
 
 
 @utils.register_interface(CipherBackend)

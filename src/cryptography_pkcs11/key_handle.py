@@ -45,11 +45,10 @@ def build_attributes(attrs, backend):
 # TODO: this is all untested for now
 def key_handle_from_attributes(attributes, backend):
     # TODO: need a public API for building attribute templates
-    session = backend._session_pool.acquire()
-    rv = backend._lib.C_FindObjectsInit(
-        session[0], attributes.template, len(attributes.template)
+    session = backend._session_pool.acquire_and_init(
+        backend, backend._lib.C_FindObjectsInit, attributes.template,
+        len(attributes.template)
     )
-    backend._check_error(rv)
 
     count = backend._ffi.new("CK_ULONG *")
     obj_handle_ptr = backend._ffi.new("CK_OBJECT_HANDLE[2]")

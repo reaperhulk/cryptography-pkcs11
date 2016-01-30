@@ -45,13 +45,13 @@ Issues
 ------
 
 * Session management is still pretty terrible.
+
   * Session objects are presumed to be available to all sessions, which is
     only true if you don't close sessions.
   * No `CKA_TOKEN` False objects are ever deleted, so device memory will run out
     over time if you run the test suite repeatedly.
-  * Sessions that generate exceptions during an active operation are returned to
-    the session pool without the operation being terminated. This results in all
-    subsequent attempts to use the session to fail with `CKR_OPERATION_ACTIVE`.
+  * Sessions that generate exceptions during an active operation are destroyed
+    and a new session is opened to take their place. This is a blocking operation.
 * Generating or loading a key with `CKA_TOKEN` True is not supported at all yet.
 * When adding the ``pkcs11`` entry point for multibackend it is injected as the
   first element in the array. This is probably not desirable.

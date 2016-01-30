@@ -92,9 +92,10 @@ class _RSAPublicKey(object):
         else:
             raise NotImplementedError
 
-        session = self._backend._session_pool.acquire()
-        res = self._backend._lib.C_EncryptInit(session[0], mech, self._handle)
-        self._backend._check_error(res)
+        session = self._backend._session_pool.acquire_and_init(
+            self._backend, self._backend._lib.C_EncryptInit, mech,
+            self._handle
+        )
         # TODO: size this properly. Right now it's large enough for a
         # 2048-bit key.
         buf = self._backend._ffi.new("unsigned char[]", 256)
@@ -168,11 +169,10 @@ class _RSAPrivateKey(object):
         else:
             raise NotImplementedError
 
-        session = self._backend._session_pool.acquire()
-        res = self._backend._lib.C_DecryptInit(
-            session[0], mech, self._handle
+        session = self._backend._session_pool.acquire_and_init(
+            self._backend, self._backend._lib.C_DecryptInit, mech,
+            self._handle
         )
-        self._backend._check_error(res)
         # TODO: size this properly. Right now it's large enough for a
         # 2048-bit key.
         buf = self._backend._ffi.new("unsigned char[]", 256)
@@ -356,9 +356,11 @@ def _sign_verify_init(backend, func, padding, key, algorithm):
             "{0} is not supported by this backend.".format(padding.name),
             _Reasons.UNSUPPORTED_PADDING
         )
-    session = backend._session_pool.acquire()
-    res = func(session[0], mech, key._handle)
-    if res != 0:
-        raise ValueError("Error code {} received from PKCS11".format(hex(res)))
+    session = backend._session_pool.acquire_and_init(
+        backend, func, mech, key._handle
+    )
+    # TODO: probably modify acquire and init to be able to raise diff errors
+    # if res != 0:
+    #     raise ValueError("Error code {} received from PKCS11".format(hex(res)))
 
     return session

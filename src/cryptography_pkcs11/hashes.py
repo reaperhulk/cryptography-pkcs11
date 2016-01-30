@@ -25,11 +25,11 @@ class _HashContext(object):
                     _Reasons.UNSUPPORTED_HASH
                 )
 
-            ctx = self._backend._session_pool.acquire()
             mech = self._backend._ffi.new("CK_MECHANISM *")
             mech.mechanism = ckm
-            res = self._backend._lib.C_DigestInit(ctx[0], mech)
-            self._backend._check_error(res)
+            ctx = self._backend._session_pool.acquire_and_init(
+                backend, self._backend._lib.C_DigestInit, mech
+            )
 
         self._ctx = ctx
 
