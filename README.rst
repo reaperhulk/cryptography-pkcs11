@@ -33,14 +33,26 @@ Then, if all is well you can import the backend and hash a thing.
     >>> from cryptography_pkcs11.backend import backend
 
 
+Supported Interfaces
+--------------------
+
+* HashBackend (except copy)
+* HMACBackend (except copy)
+* RSABackend (no generation, several other issues)
+* CipherBackend (AES ECB/CBC, 3DES ECB/CBC only)
+
 Issues
 ------
 
-* Very few backends are supported. None fully.
 * Session management is still pretty terrible.
+  * Session objects are presumed to be available to all sessions, which is
+    only true if you don't close sessions.
+  * No `CKA_TOKEN` False objects are ever deleted, so device memory will run out
+    over time if you run the test suite repeatedly.
+  * Sessions that generate exceptions during an active operation are returned to
+    the session pool without the operation being terminated. This results in all
+    subsequent attempts to use the session to fail with `CKR_OPERATION_ACTIVE`.
 * Generating or loading a key with `CKA_TOKEN` True is not supported at all yet.
-* Assumptions about the ability to share key handles across sessions are made.
-  Whether this is true across all PKCS11 implementations is not clear.
 * When adding the ``pkcs11`` entry point for multibackend it is injected as the
   first element in the array. This is probably not desirable.
 

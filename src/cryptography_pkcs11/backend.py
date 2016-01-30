@@ -9,18 +9,19 @@ import threading
 
 from cryptography import utils
 from cryptography.hazmat.backends.interfaces import (
-    CipherBackend, HashBackend, RSABackend
+    CipherBackend, HMACBackend, HashBackend, RSABackend
 )
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.padding import (
     MGF1, OAEP, PKCS1v15, PSS
 )
 from cryptography.hazmat.primitives.ciphers.algorithms import AES, TripleDES
-from cryptography.hazmat.primitives.ciphers.modes import CBC, CTR, ECB
+from cryptography.hazmat.primitives.ciphers.modes import CBC, ECB
 
 from cryptography_pkcs11.binding import Binding
 from cryptography_pkcs11.ciphers import _CipherContext
 from cryptography_pkcs11.hashes import _HashContext
+from cryptography_pkcs11.hmac import _HMACContext
 from cryptography_pkcs11.key_handle import Attribute, build_attributes
 from cryptography_pkcs11.rsa import _RSAPrivateKey, _RSAPublicKey
 
@@ -107,6 +108,7 @@ class PKCS11SessionPool(object):
 
 
 @utils.register_interface(CipherBackend)
+@utils.register_interface(HMACBackend)
 @utils.register_interface(HashBackend)
 @utils.register_interface(RSABackend)
 class Backend(object):
@@ -297,6 +299,12 @@ class Backend(object):
             "final": self._lib.C_DecryptFinal
         }
         return _CipherContext(self, cipher, mode, operation)
+
+    def hmac_supported(self, algorithm):
+        return self.hash_supported(algorithm)
+
+    def create_hmac_ctx(self, key, algorithm):
+        return _HMACContext(self, key, algorithm)
 
 
 backend = Backend()
