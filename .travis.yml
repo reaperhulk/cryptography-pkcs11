@@ -1,0 +1,43 @@
+sudo: required
+dist: trusty
+language: python
+cache:
+  directories:
+    - $HOME/.cache/pip
+
+env:
+  global:
+    - CRYPTOGRAPHY_PKCS11_SLOT_ID=0
+    - CRYPTOGRAPHY_PKCS11_FLAGS=6
+    - CRYPTOGRAPHY_PKCS11_USER_TYPE=1
+    - CRYPTOGRAPHY_PKCS11_PASSWORD=1111
+    - SOFTHSM2_CONF=$HOME/softhsm2.conf
+
+
+matrix:
+  include:
+    - python: 2.7
+      env:
+        -TOXENV=py27
+        - CRYPTOGRAPHY_PKCS11_PATH=/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so
+    # - language: generic
+    #   os: osx
+    #   osx_image: xcode7.2
+    #   env:
+    #     - TOXENV=py27
+    #     - CRYPTOGRAPHY_PKCS11_PATH=/usr/local/Cellar/softhsm/2.0.0/lib/softhsm/libsofthsm2.so
+
+
+install:
+  - ./.travis/install.sh
+
+script:
+  - ./.travis/run.sh
+
+# after_success:
+#   - |
+#     source ~/.venv/bin/activate
+#     codecov
+
+notifications:
+  email: false

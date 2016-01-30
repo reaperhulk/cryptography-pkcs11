@@ -1,3 +1,5 @@
 softhsm2.conf
 tokens/
 *.egg-info
+.coverage
+.tox

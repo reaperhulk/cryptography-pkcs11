@@ -1,0 +1,12 @@
+[run]
+branch = True
+source =
+    cryptography_pkcs11
+
+
+[paths]
+source =
+   src/cryptography_pkcs11
+   .tox/*/lib/python*/site-packages/cryptography_pkcs11
+   .tox/pypy/site-packages/cryptography_pkcs11
+
