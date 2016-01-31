@@ -20,6 +20,10 @@ matrix:
       env:
         -TOXENV=py27
         - CRYPTOGRAPHY_PKCS11_PATH=/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so
+    - python: 2.7
+      env:
+        -TOXENV=docs
+        - CRYPTOGRAPHY_PKCS11_PATH=/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so
     # - language: generic
     #   os: osx
     #   osx_image: xcode7.2

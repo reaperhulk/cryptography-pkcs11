@@ -76,6 +76,21 @@ setup(
     packages=find_packages(where="src"),
     install_requires=requirements,
     tests_require=test_requirements,
+    extras_require={
+        "docs-test": [
+            "doc8",
+            "pyenchant",
+            "readme_renderer",
+            "sphinx",
+            "sphinx_rtd_theme",
+            "sphinxcontrib-spelling",
+        ],
+        "pep8-test": [
+            "flake8",
+            "flake8-import-order",
+            "pep8-naming",
+        ],
+    },
     ext_package="cryptography_pkcs11",
     zip_safe=True,
     entry_points={
