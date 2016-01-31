@@ -8,7 +8,7 @@ import math
 
 from cryptography import utils
 from cryptography.exceptions import (
-    InvalidSignature, UnsupportedAlgorithm, _Reasons
+    AlreadyFinalized, InvalidSignature, UnsupportedAlgorithm, _Reasons
 )
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import (
@@ -28,7 +28,7 @@ def _get_rsa_pss_salt_length(pss, key_size, digest_size):
     if salt is MGF1.MAX_LENGTH or salt is PSS.MAX_LENGTH:
         # bit length - 1 per RFC 3447
         emlen = int(math.ceil((key_size - 1) / 8.0))
-        salt_length = emlen - digest_size - 2  # TODO: this still needs investigation. Should it actually be -3?
+        salt_length = emlen - digest_size - 2
         assert salt_length >= 0
         return salt_length
     else:
@@ -41,18 +41,18 @@ def _check_enc_dec(padding):
             "Padding must be an instance of AsymmetricPadding."
         )
 
-        if isinstance(padding, OAEP):
-            if not isinstance(padding._mgf, MGF1):
-                raise UnsupportedAlgorithm(
-                    "Only MGF1 is supported by this backend.",
-                    _Reasons.UNSUPPORTED_MGF
-                )
-            if not isinstance(padding._mgf._algorithm, hashes.SHA1):
-                raise UnsupportedAlgorithm(
-                    "This backend supports only SHA1 inside MGF1 when "
-                    "using OAEP.",
-                    _Reasons.UNSUPPORTED_HASH
-                )
+    if isinstance(padding, OAEP):
+        if not isinstance(padding._mgf, MGF1):
+            raise UnsupportedAlgorithm(
+                "Only MGF1 is supported by this backend.",
+                _Reasons.UNSUPPORTED_MGF
+            )
+        if not isinstance(padding._mgf._algorithm, hashes.SHA1):
+            raise UnsupportedAlgorithm(
+                "This backend supports only SHA1 inside MGF1 when "
+                "using OAEP.",
+                _Reasons.UNSUPPORTED_HASH
+            )
 
 
 @utils.register_interface(rsa.RSAPublicKeyWithSerialization)
@@ -62,72 +62,33 @@ class _RSAPublicKey(object):
         self._handle = handle
 
     def verifier(self, signature, padding, algorithm):
+        if not isinstance(signature, bytes):
+            raise TypeError("signature must be bytes.")
+
         return _RSAVerificationContext(
             self._backend, self, signature, padding, algorithm
         )
 
     def encrypt(self, plaintext, padding):
-        _check_enc_dec(padding)
-        mech = self._backend._ffi.new("CK_MECHANISM *")
-
-        if isinstance(padding, PKCS1v15):
-            mech.mechanism = self._backend._binding.CKM_RSA_PKCS
-        elif isinstance(padding, OAEP):
-            if padding._label is not None and padding._label != b"":
-                raise ValueError("This backend does not support OAEP labels.")
-
-            if not isinstance(padding._algorithm, hashes.SHA1):
-                raise UnsupportedAlgorithm(
-                    "This backend only supports SHA1 when using OAEP.",
-                    _Reasons.UNSUPPORTED_HASH
-                )
-
-            mech.mechanism = self._backend._binding.CKM_RSA_PKCS_OAEP
-            oaep_params = self._backend._ffi.new("CK_RSA_PKCS_OAEP_PARAMS *")
-            oaep_params.hashAlg = self._backend._binding.CKM_SHA_1
-            oaep_params.mgf = self._backend._binding.CKG_MGF1_SHA1
-            oaep_params.source = 1  # apparently this is CKZ_DATA_SPECIFIED
-            mech.parameter = oaep_params
-            mech.parameter_len = 40  # size of that struct
-        else:
-            raise NotImplementedError
-
-        session = self._backend._session_pool.acquire_and_init(
-            self._backend, self._backend._lib.C_EncryptInit, mech,
-            self._handle
+        res, buf, buflen = _enc_dec(
+            self._backend, padding, self._backend._lib.C_EncryptInit,
+            self._backend._lib.C_Encrypt, self._handle, plaintext
         )
-        # TODO: size this properly. Right now it's large enough for a
-        # 2048-bit key.
-        buf = self._backend._ffi.new("unsigned char[]", 256)
-        buflen = self._backend._ffi.new("CK_ULONG *", 256)
-        res = self._backend._lib.C_Encrypt(
-            session[0], plaintext, len(plaintext), buf, buflen
-        )
-        self._backend._check_error(res)
+        if res != 0:
+            raise ValueError(
+                "Encryption failed. This is commonly due to the data size "
+                "being too large for the key"
+            )
 
         return self._backend._ffi.buffer(buf, buflen[0])[:]
 
+    def public_numbers(self):
+        e, n = _get_e_n(self._backend, self._handle)
+        return rsa.RSAPublicNumbers(e, n)
+
     @property
     def key_size(self):
-        # TODO: cache this. and also handle non-bye aligned keys
-        attrs = build_attributes([
-            Attribute(
-                self._backend._binding.CKA_MODULUS, self._backend._ffi.NULL
-            ),
-        ], self._backend)
-        session = self._backend._session_pool.acquire()
-        res = self._backend._lib.C_GetAttributeValue(
-            session[0], self._handle, attrs.template, len(attrs.template)
-        )
-        self._backend._check_error(res)
-        # TODO: the PKCS11 lib is allocating and returning a char * here.
-        # Are we responsible for freeing or is it on the stack?
-        key_size = attrs.template[0].value_len
-
-        return key_size * 8
-
-    def public_numbers(self):
-        pass
+        return _key_size(self._backend, self._handle)
 
     def public_bytes(self, encoding, format):
         pass
@@ -144,41 +105,9 @@ class _RSAPrivateKey(object):
         return _RSASignatureContext(self._backend, self, padding, algorithm)
 
     def decrypt(self, ciphertext, padding):
-        _check_enc_dec(padding)
-        mech = self._backend._ffi.new("CK_MECHANISM *")
-
-        if isinstance(padding, PKCS1v15):
-            mech.mechanism = self._backend._binding.CKM_RSA_PKCS
-        elif isinstance(padding, OAEP):
-            if padding._label is not None and padding._label != b"":
-                raise ValueError("This backend does not support OAEP labels.")
-
-            if not isinstance(padding._algorithm, hashes.SHA1):
-                raise UnsupportedAlgorithm(
-                    "This backend only supports SHA1 when using OAEP.",
-                    _Reasons.UNSUPPORTED_HASH
-                )
-
-            mech.mechanism = self._backend._binding.CKM_RSA_PKCS_OAEP
-            oaep_params = self._backend._ffi.new("CK_RSA_PKCS_OAEP_PARAMS *")
-            oaep_params.hashAlg = self._backend._binding.CKM_SHA_1
-            oaep_params.mgf = self._backend._binding.CKG_MGF1_SHA1
-            oaep_params.source = 1  # apparently this is CKZ_DATA_SPECIFIED
-            mech.parameter = oaep_params
-            mech.parameter_len = 40  # size of that struct
-        else:
-            raise NotImplementedError
-
-        session = self._backend._session_pool.acquire_and_init(
-            self._backend, self._backend._lib.C_DecryptInit, mech,
-            self._handle
-        )
-        # TODO: size this properly. Right now it's large enough for a
-        # 2048-bit key.
-        buf = self._backend._ffi.new("unsigned char[]", 256)
-        buflen = self._backend._ffi.new("CK_ULONG *", 256)
-        res = self._backend._lib.C_Decrypt(
-            session[0], ciphertext, len(ciphertext), buf, buflen
+        res, buf, buflen = _enc_dec(
+            self._backend, padding, self._backend._lib.C_DecryptInit,
+            self._backend._lib.C_Decrypt, self._handle, ciphertext
         )
         if res != 0:
             raise ValueError("Decryption failed")
@@ -186,59 +115,14 @@ class _RSAPrivateKey(object):
         return self._backend._ffi.buffer(buf, buflen[0])[:]
 
     def public_key(self):
-        # TODO: These buffers could be dynamically sized in the future, but
-        # it would require two calls to the PKCS11 layer. Right now it will
-        # work with a single call as long as the key is 8192-bit or smaller and
-        # the modulus isn't some ludicrous value.
-        attrs = build_attributes([
-            Attribute(
-                self._backend._binding.CKA_MODULUS,
-                self._backend._ffi.new("unsigned char[]", 1024)
-            ),
-            Attribute(
-                self._backend._binding.CKA_PUBLIC_EXPONENT,
-                self._backend._ffi.new("unsigned char[]", 1024)
-            ),
-        ], self._backend)
-        session = self._backend._session_pool.acquire()
-        res = self._backend._lib.C_GetAttributeValue(
-            session[0], self._handle, attrs.template, len(attrs.template)
-        )
-        self._backend._check_error(res)
-        # okay, now we get to create a new object handle!
-        n = utils.int_from_bytes(
-            self._backend._ffi.buffer(
-                attrs.template[0].value, attrs.template[0].value_len
-            )[:],
-            'big'
-        )
-        e = utils.int_from_bytes(
-            self._backend._ffi.buffer(
-                attrs.template[1].value, attrs.template[1].value_len
-            )[:],
-            'big'
-        )
-
+        e, n = _get_e_n(self._backend, self._handle)
         return self._backend.load_rsa_public_numbers(
             rsa.RSAPublicNumbers(e, n)
         )
 
     @property
     def key_size(self):
-        # TODO: cache this. and also handle non-bye aligned keys
-        attrs = build_attributes([
-            Attribute(
-                self._backend._binding.CKA_MODULUS, self._backend._ffi.NULL
-            ),
-        ], self._backend)
-        session = self._backend._session_pool.acquire()
-        res = self._backend._lib.C_GetAttributeValue(
-            session[0], self._handle, attrs.template, len(attrs.template)
-        )
-        self._backend._check_error(res)
-        key_size = attrs.template[0].value_len
-
-        return key_size * 8
+        return _key_size(self._backend, self._handle)
 
 
 @utils.register_interface(AsymmetricSignatureContext)
@@ -254,17 +138,24 @@ class _RSASignatureContext(object):
         )
 
     def update(self, data):
+        if self._session is None:
+            raise AlreadyFinalized("Context has already been finalized.")
+
         res = self._backend._lib.C_SignUpdate(
             self._session[0], data, len(data)
         )
         self._backend._check_error(res)
 
     def finalize(self):
+        if self._session is None:
+            raise AlreadyFinalized("Context has already been finalized.")
+
         # TODO: size this properly. Right now it's large enough for a
         # 2048-bit key.
         buf = self._backend._ffi.new("unsigned char[]", 256)
         buflen = self._backend._ffi.new("CK_ULONG *", 256)
         res = self._backend._lib.C_SignFinal(self._session[0], buf, buflen)
+        self._session = None
         if res != 0:
             raise ValueError("Signature failed")
 
@@ -285,16 +176,23 @@ class _RSAVerificationContext(object):
         )
 
     def update(self, data):
+        if self._session is None:
+            raise AlreadyFinalized("Context has already been finalized.")
+
         res = self._backend._lib.C_VerifyUpdate(
             self._session[0], data, len(data)
         )
         self._backend._check_error(res)
 
     def verify(self):
+        if self._session is None:
+            raise AlreadyFinalized("Context has already been finalized.")
+
         buf = self._backend._ffi.new("unsigned char[]", self._signature)
         res = self._backend._lib.C_VerifyFinal(
             self._session[0], buf, len(self._signature)
         )
+        self._session = None
         if res != 0:
             raise InvalidSignature
 
@@ -361,6 +259,88 @@ def _sign_verify_init(backend, func, padding, key, algorithm):
     )
     # TODO: probably modify acquire and init to be able to raise diff errors
     # if res != 0:
-    #     raise ValueError("Error code {} received from PKCS11".format(hex(res)))
+    #  raise ValueError("Error code {} received from PKCS11".format(hex(res)))
 
     return session
+
+
+def _enc_dec(backend, padding, init, operation, handle, data):
+    _check_enc_dec(padding)
+    mech = backend._ffi.new("CK_MECHANISM *")
+
+    if isinstance(padding, PKCS1v15):
+        mech.mechanism = backend._binding.CKM_RSA_PKCS
+    elif isinstance(padding, OAEP):
+        if padding._label is not None and padding._label != b"":
+            raise ValueError("This backend does not support OAEP labels.")
+
+        if not isinstance(padding._algorithm, hashes.SHA1):
+            raise UnsupportedAlgorithm(
+                "This backend only supports SHA1 when using OAEP.",
+                _Reasons.UNSUPPORTED_HASH
+            )
+
+        mech.mechanism = backend._binding.CKM_RSA_PKCS_OAEP
+        oaep_params = backend._ffi.new("CK_RSA_PKCS_OAEP_PARAMS *")
+        oaep_params.hashAlg = backend._binding.CKM_SHA_1
+        oaep_params.mgf = backend._binding.CKG_MGF1_SHA1
+        oaep_params.source = 1  # apparently this is CKZ_DATA_SPECIFIED
+        mech.parameter = oaep_params
+        mech.parameter_len = 40  # size of that struct
+    else:
+        raise UnsupportedAlgorithm(
+            "{0} is not supported by this backend.".format(padding.name),
+            _Reasons.UNSUPPORTED_PADDING
+        )
+
+    session = backend._session_pool.acquire_and_init(
+        backend, init, mech, handle
+    )
+    # TODO: size this properly. Right now it's large enough for a
+    # 2048-bit key.
+    buf = backend._ffi.new("unsigned char[]", 256)
+    buflen = backend._ffi.new("CK_ULONG *", 256)
+    res = operation(session[0], data, len(data), buf, buflen)
+    return (res, buf, buflen)
+
+
+def _get_e_n(backend, handle):
+        # TODO: These buffers could be dynamically sized in the future, but
+        # it would require two calls to the PKCS11 layer. Right now it will
+        # work with a single call as long as the key is 8192-bit or smaller and
+        # the modulus isn't some ludicrous value.
+        attrs = build_attributes([
+            Attribute(
+                backend._binding.CKA_MODULUS,
+                backend._ffi.new("unsigned char[]", 1024)
+            ),
+            Attribute(
+                backend._binding.CKA_PUBLIC_EXPONENT,
+                backend._ffi.new("unsigned char[]", 64)
+            ),
+        ], backend)
+        session = backend._session_pool.acquire()
+        res = backend._lib.C_GetAttributeValue(
+            session[0], handle, attrs.template, len(attrs.template)
+        )
+        backend._check_error(res)
+        n = utils.int_from_bytes(
+            backend._ffi.buffer(
+                attrs.template[0].value, attrs.template[0].value_len
+            )[:],
+            'big'
+        )
+        e = utils.int_from_bytes(
+            backend._ffi.buffer(
+                attrs.template[1].value, attrs.template[1].value_len
+            )[:],
+            'big'
+        )
+
+        return e, n
+
+
+def _key_size(backend, handle):
+    # TODO: cache this. and also handle non-bye aligned keys
+    e, n = _get_e_n(backend, handle)
+    return n.bit_length()

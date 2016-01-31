@@ -12,6 +12,7 @@ from cryptography.hazmat.backends.interfaces import (
     CipherBackend, HMACBackend, HashBackend, RSABackend
 )
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.padding import (
     MGF1, OAEP, PKCS1v15, PSS
 )
@@ -174,24 +175,21 @@ class Backend(object):
         mech = self._ffi.new("CK_MECHANISM *")
         mech.mechanism = self._binding.CKM_RSA_PKCS_KEY_PAIR_GEN
         pub_attrs = build_attributes([
-            Attribute(
-                self._binding.CKA_PUBLIC_EXPONENT,
-                utils.int_to_bytes(public_exponent)
-            ),
+            # Attribute(
+            #     self._binding.CKA_PUBLIC_EXPONENT,
+            #     utils.int_to_bytes(public_exponent)
+            # ),
             Attribute(self._binding.CKA_MODULUS_BITS, key_size),
-            Attribute(self._binding.CKA_TOKEN, True),  # don't persist it
+            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
+            Attribute(self._binding.CKA_PRIVATE, False),
             Attribute(self._binding.CKA_ENCRYPT, True),
             Attribute(self._binding.CKA_VERIFY, True),
-            Attribute(self._binding.CKA_EXTRACTABLE, True)
         ], self)
         priv_attrs = build_attributes([
             Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
-            Attribute(self._binding.CKA_PRIVATE, True),
-            Attribute(self._binding.CKA_SENSITIVE, False),
-            Attribute(self._binding.CKA_ENCRYPT, True),
+            Attribute(self._binding.CKA_PRIVATE, False),
             Attribute(self._binding.CKA_DECRYPT, True),
             Attribute(self._binding.CKA_SIGN, True),
-            Attribute(self._binding.CKA_VERIFY, True),
             Attribute(self._binding.CKA_EXTRACTABLE, True)
         ], self)
         # TODO: remember that you can get the public key values from
@@ -222,6 +220,17 @@ class Backend(object):
         return False
 
     def load_rsa_private_numbers(self, numbers):
+        rsa._check_private_key_components(
+            numbers.p,
+            numbers.q,
+            numbers.d,
+            numbers.dmp1,
+            numbers.dmq1,
+            numbers.iqmp,
+            numbers.public_numbers.e,
+            numbers.public_numbers.n
+        )
+
         attrs = build_attributes([
             Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
             Attribute(self._binding.CKA_CLASS, self._binding.CKO_PRIVATE_KEY),
@@ -272,6 +281,8 @@ class Backend(object):
         return _RSAPrivateKey(self, object_handle[0])
 
     def load_rsa_public_numbers(self, numbers):
+        rsa._check_public_key_components(numbers.e, numbers.n)
+
         attrs = build_attributes([
             Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
             Attribute(self._binding.CKA_CLASS, self._binding.CKO_PUBLIC_KEY),
