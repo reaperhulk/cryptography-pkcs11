@@ -23,7 +23,7 @@ from cryptography_pkcs11.binding import Binding
 from cryptography_pkcs11.ciphers import _CipherContext
 from cryptography_pkcs11.hashes import _HashContext
 from cryptography_pkcs11.hmac import _HMACContext
-from cryptography_pkcs11.key_handle import Attribute, build_attributes
+from cryptography_pkcs11.key_handle import build_attributes
 from cryptography_pkcs11.rsa import _RSAPrivateKey, _RSAPublicKey
 
 
@@ -175,22 +175,22 @@ class Backend(object):
         mech = self._ffi.new("CK_MECHANISM *")
         mech.mechanism = self._binding.CKM_RSA_PKCS_KEY_PAIR_GEN
         pub_attrs = build_attributes([
-            # Attribute(
-            #     self._binding.CKA_PUBLIC_EXPONENT,
-            #     utils.int_to_bytes(public_exponent)
-            # ),
-            Attribute(self._binding.CKA_MODULUS_BITS, key_size),
-            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
-            Attribute(self._binding.CKA_PRIVATE, False),
-            Attribute(self._binding.CKA_ENCRYPT, True),
-            Attribute(self._binding.CKA_VERIFY, True),
+            (
+                self._binding.CKA_PUBLIC_EXPONENT,
+                utils.int_to_bytes(public_exponent)
+            ),
+            (self._binding.CKA_MODULUS_BITS, key_size),
+            (self._binding.CKA_TOKEN, False),  # don't persist it
+            (self._binding.CKA_PRIVATE, False),
+            (self._binding.CKA_ENCRYPT, True),
+            (self._binding.CKA_VERIFY, True),
         ], self)
         priv_attrs = build_attributes([
-            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
-            Attribute(self._binding.CKA_PRIVATE, False),
-            Attribute(self._binding.CKA_DECRYPT, True),
-            Attribute(self._binding.CKA_SIGN, True),
-            Attribute(self._binding.CKA_EXTRACTABLE, True)
+            (self._binding.CKA_TOKEN, False),  # don't persist it
+            (self._binding.CKA_PRIVATE, False),
+            (self._binding.CKA_DECRYPT, True),
+            (self._binding.CKA_SIGN, True),
+            (self._binding.CKA_EXTRACTABLE, True)
         ], self)
         # TODO: remember that you can get the public key values from
         # CKA_MODULUS and CKA_PUBLIC_EXPONENT. but you can't perform
@@ -232,41 +232,26 @@ class Backend(object):
         )
 
         attrs = build_attributes([
-            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
-            Attribute(self._binding.CKA_CLASS, self._binding.CKO_PRIVATE_KEY),
-            Attribute(self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
-            Attribute(
+            (self._binding.CKA_TOKEN, False),  # don't persist it
+            (self._binding.CKA_CLASS, self._binding.CKO_PRIVATE_KEY),
+            (self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
+            (
                 self._binding.CKA_MODULUS,
                 utils.int_to_bytes(numbers.public_numbers.n)
             ),
-            Attribute(
+            (
                 self._binding.CKA_PUBLIC_EXPONENT,
                 utils.int_to_bytes(numbers.public_numbers.e)
             ),
-            Attribute(
+            (
                 self._binding.CKA_PRIVATE_EXPONENT,
                 utils.int_to_bytes(numbers.d)
             ),
-            Attribute(
-                self._binding.CKA_PRIME_1,
-                utils.int_to_bytes(numbers.p)
-            ),
-            Attribute(
-                self._binding.CKA_PRIME_2,
-                utils.int_to_bytes(numbers.q)
-            ),
-            Attribute(
-                self._binding.CKA_EXPONENT_1,
-                utils.int_to_bytes(numbers.dmp1)
-            ),
-            Attribute(
-                self._binding.CKA_EXPONENT_2,
-                utils.int_to_bytes(numbers.dmq1)
-            ),
-            Attribute(
-                self._binding.CKA_COEFFICIENT,
-                utils.int_to_bytes(numbers.iqmp)
-            ),
+            (self._binding.CKA_PRIME_1, utils.int_to_bytes(numbers.p)),
+            (self._binding.CKA_PRIME_2, utils.int_to_bytes(numbers.q)),
+            (self._binding.CKA_EXPONENT_1, utils.int_to_bytes(numbers.dmp1)),
+            (self._binding.CKA_EXPONENT_2, utils.int_to_bytes(numbers.dmq1)),
+            (self._binding.CKA_COEFFICIENT, utils.int_to_bytes(numbers.iqmp)),
         ], self)
 
         session = self._session_pool.acquire()
@@ -284,16 +269,11 @@ class Backend(object):
         rsa._check_public_key_components(numbers.e, numbers.n)
 
         attrs = build_attributes([
-            Attribute(self._binding.CKA_TOKEN, False),  # don't persist it
-            Attribute(self._binding.CKA_CLASS, self._binding.CKO_PUBLIC_KEY),
-            Attribute(self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
-            Attribute(
-                self._binding.CKA_MODULUS, utils.int_to_bytes(numbers.n)
-            ),
-            Attribute(
-                self._binding.CKA_PUBLIC_EXPONENT,
-                utils.int_to_bytes(numbers.e)
-            ),
+            (self._binding.CKA_TOKEN, False),  # don't persist it
+            (self._binding.CKA_CLASS, self._binding.CKO_PUBLIC_KEY),
+            (self._binding.CKA_KEY_TYPE, self._binding.CKK_RSA),
+            (self._binding.CKA_MODULUS, utils.int_to_bytes(numbers.n)),
+            (self._binding.CKA_PUBLIC_EXPONENT, utils.int_to_bytes(numbers.e)),
         ], self)
 
         session = self._session_pool.acquire()

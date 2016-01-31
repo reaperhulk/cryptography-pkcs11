@@ -4,36 +4,35 @@
 
 from __future__ import absolute_import, division, print_function
 
-import collections
-
 import six
 
 
-Attribute = collections.namedtuple("Attribute", ["type", "value"])
-CKAttributes = collections.namedtuple("CKAttributes", ["template", "cffivals"])
+class CKAttributes(object):
+    def __init__(self, template, cffivals):
+        self.template = template
+        self._cffivals = cffivals
 
 
 def build_attributes(attrs, backend):
     attributes = backend._ffi.new("CK_ATTRIBUTE[{0}]".format(len(attrs)))
+    # We build and append to the val_list so that the cdata wrappers we create
+    # do not fall out of scope and cause the underlying memory to be gc'd
     val_list = []
     for index, attr in enumerate(attrs):
-        attributes[index].type = attr.type
-        if isinstance(attr.value, bool):
-            val_list.append(backend._ffi.new("unsigned char *",
-                            int(attr.value)))
+        attributes[index].type = attr[0]
+        if isinstance(attr[1], bool):
+            val_list.append(backend._ffi.new("unsigned char *", int(attr[1])))
             attributes[index].value_len = 1  # sizeof(char) is 1
-        elif isinstance(attr.value, int):
+        elif isinstance(attr[1], int):
             # second because bools are also considered ints
-            val_list.append(backend._ffi.new("CK_ULONG *", attr.value))
+            val_list.append(backend._ffi.new("CK_ULONG *", attr[1]))
             attributes[index].value_len = 8
-        elif isinstance(attr.value, six.binary_type):
-            val_list.append(backend._ffi.new("char []", attr.value))
-            attributes[index].value_len = len(attr.value)
-        elif isinstance(attr.value, backend._ffi.CData):
-            val_list.append(attr.value)
-            attributes[index].value_len = backend._ffi.sizeof(
-                attr.value
-            )
+        elif isinstance(attr[1], six.binary_type):
+            val_list.append(backend._ffi.new("char []", attr[1]))
+            attributes[index].value_len = len(attr[1])
+        elif isinstance(attr[1], backend._ffi.CData):
+            val_list.append(attr[1])
+            attributes[index].value_len = backend._ffi.sizeof(attr[1])
         else:
             raise TypeError("Unknown attribute type provided.")
 
@@ -70,12 +69,12 @@ def key_handle_from_attributes(attributes, backend):
 def key_handle_from_bytes(data, backend):
     session = backend._session_pool.acquire()
     attrs = build_attributes([
-        Attribute(backend._binding.CKA_CLASS, backend._binding.CKO_SECRET_KEY),
-        Attribute(backend._binding.CKA_KEY_TYPE, backend._binding.CKK_AES),
-        Attribute(backend._binding.CKA_VALUE, data),
-        Attribute(backend._binding.CKA_TOKEN, False),  # don't persist it
-        Attribute(backend._binding.CKA_ENCRYPT, True),
-        Attribute(backend._binding.CKA_DECRYPT, True),
+        (backend._binding.CKA_CLASS, backend._binding.CKO_SECRET_KEY),
+        (backend._binding.CKA_KEY_TYPE, backend._binding.CKK_AES),
+        (backend._binding.CKA_VALUE, data),
+        (backend._binding.CKA_TOKEN, False),  # don't persist it
+        (backend._binding.CKA_ENCRYPT, True),
+        (backend._binding.CKA_DECRYPT, True),
     ], backend)
     object_handle = backend._ffi.new("CK_OBJECT_HANDLE *")
     res = backend._lib.C_CreateObject(
@@ -92,7 +91,7 @@ class KeyHandle(object):
         session = backend._session_pool.acquire()
         length = backend._ffi.new("CK_ULONG *")
         attrs = build_attributes([
-            Attribute(backend._binding.CKA_VALUE_LEN, length),
+            (backend._binding.CKA_VALUE_LEN, length),
         ], backend)
         res = backend._lib.C_GetAttributeValue(
             session[0], self._handle, attrs.template, len(attrs.template)

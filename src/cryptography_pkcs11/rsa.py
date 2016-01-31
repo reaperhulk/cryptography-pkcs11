@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.padding import (
     AsymmetricPadding, MGF1, OAEP, PKCS1v15, PSS
 )
 
-from cryptography_pkcs11.key_handle import Attribute, build_attributes
+from cryptography_pkcs11.key_handle import build_attributes
 
 
 # TODO: stolen from openssl backend
@@ -310,11 +310,11 @@ def _get_e_n(backend, handle):
         # work with a single call as long as the key is 8192-bit or smaller and
         # the modulus isn't some ludicrous value.
         attrs = build_attributes([
-            Attribute(
+            (
                 backend._binding.CKA_MODULUS,
                 backend._ffi.new("unsigned char[]", 1024)
             ),
-            Attribute(
+            (
                 backend._binding.CKA_PUBLIC_EXPONENT,
                 backend._ffi.new("unsigned char[]", 64)
             ),
