@@ -38,7 +38,12 @@ Supported Interfaces
 
 * HashBackend (except copy)
 * HMACBackend (except copy)
-* RSABackend (no generation, several other issues)
+* RSABackend (skipped tests)
+
+  * `test_pss_minimum_key_size_for_digest` - The test uses SHA1 MGF1 and SHA512 hash. SoftHSM doesn't allow your MGF1 hash to not match the signing hash algorithm.
+  * `test_pss_verify_salt_length_too_long` - Errors during init when the test expects it to error during final verification.
+  * `test_pss_signing_salt_length_too_long` - Errors during init when the test expects it to error during signing.
+
 * CipherBackend (AES ECB/CBC, 3DES ECB/CBC only)
 
 Issues
