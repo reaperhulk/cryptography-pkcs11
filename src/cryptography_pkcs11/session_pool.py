@@ -11,33 +11,32 @@ import threading
 class PKCS11SessionPool(object):
     def __init__(self, backend, pool_size=10, slot_id=None, flags=None,
                  user_type=None, password=None):
-        if slot_id is None:
-            slot_id = int(os.environ.get("CRYPTOGRAPHY_PKCS11_SLOT_ID"))
+        if pool_size <= 0:
+            raise ValueError("pool_size must be greater than zero")
 
         if slot_id is None:
-            raise ValueError("slot_id must not be None")
+            slot_id = os.environ.get("CRYPTOGRAPHY_PKCS11_SLOT_ID")
+            if slot_id is None:
+                raise ValueError("slot_id must not be None")
 
         if flags is None:
-            flags = int(os.environ.get("CRYPTOGRAPHY_PKCS11_FLAGS"))
-
-        if flags is None:
-            raise ValueError("flags must not be None")
+            flags = os.environ.get("CRYPTOGRAPHY_PKCS11_FLAGS")
+            if flags is None:
+                raise ValueError("flags must not be None")
 
         if user_type is None:
             user_type = int(os.environ.get("CRYPTOGRAPHY_PKCS11_USER_TYPE"))
-
-        if user_type is None:
-            raise ValueError("user_type must not be None")
+            if user_type is None:
+                raise ValueError("user_type must not be None")
 
         if password is None:
             password = os.environ.get("CRYPTOGRAPHY_PKCS11_PASSWORD")
+            if password is None:
+                raise ValueError("password must not be None")
 
-        if password is None:
-            raise ValueError("password must not be None")
-
-        self._slot_id = slot_id
+        self._slot_id = int(slot_id)
+        self._flags = int(flags)
         self._password = password
-        self._flags = flags
 
         self._backend = backend
 
