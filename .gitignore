@@ -1,6 +1,7 @@
+_build
+.cache
+.coverage
+*.egg-info
 softhsm2.conf
 tokens/
-*.egg-info
-.coverage
 .tox
-_build
