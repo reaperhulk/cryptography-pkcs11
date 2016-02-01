@@ -71,7 +71,6 @@ class _HMACContext(object):
         )
         res = self._backend._lib.C_SignFinal(self._session[0], buf, buflen)
         self._backend._check_error(res)
-        self._backend._session_pool.release(self._session)
         self._session = None
         assert buflen[0] == self.algorithm.digest_size
         return self._backend._ffi.buffer(buf, buflen[0])[:]

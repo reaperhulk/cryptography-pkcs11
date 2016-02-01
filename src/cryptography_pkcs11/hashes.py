@@ -63,7 +63,6 @@ class _HashContext(object):
         )
         res = self._backend._lib.C_DigestFinal(self._ctx[0], buf, buflen)
         self._backend._check_error(res)
-        self._backend._session_pool.release(self._ctx)
         self._ctx = None
         assert buflen[0] == self.algorithm.digest_size
         return self._backend._ffi.buffer(buf, buflen[0])[:]

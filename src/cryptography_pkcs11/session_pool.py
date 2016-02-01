@@ -17,6 +17,8 @@ class PKCS11Error(Exception):
 
 class PKCS11Session(object):
     def __init__(self, backend, pool, slot_id, flags, user_type, password):
+        # We use a weakref here since the PKCS11SessionPool can be gc'd and
+        # we don't want to release the session back into a non-existent pool
         self._pool = weakref.ref(pool)
         self._backend = backend
         session_ptr = self._backend._ffi.new("CK_SESSION_HANDLE *")
@@ -81,7 +83,7 @@ class PKCS11SessionPool(object):
 
         # TODO: document that this semaphore is used to cause it to block
         # if the caller runs out of sessions.
-        self._session_semaphore = threading.Semaphore(pool_size)
+        self._session_semaphore = threading.BoundedSemaphore(pool_size)
         self._session = []
 
         for _ in range(self.pool_size):
@@ -117,11 +119,15 @@ class PKCS11SessionPool(object):
         self._session_semaphore.release()
 
     def destroy(self, session):
-        res = self._backend._lib.C_CloseSession(session[0])
-        self._backend._check_error(res)
-        session = PKCS11Session(
+        # _pool is a weakref back to this object. In __del__ we check to
+        # see if the callable _pool() is not None and call release if it
+        # isn't. Using a lambda here makes that return None and avoids
+        # releasing the session we want to destroy back into the pool.
+        session._pool = lambda: None
+        self._backend._lib.C_CloseSession(session[0])
+        new_session = PKCS11Session(
             self._backend, self, self._slot_id, self._flags,
             self._user_type, self._password
         )
-        self._session.append(session)
+        self._session.append(new_session)
         self._session_semaphore.release()
