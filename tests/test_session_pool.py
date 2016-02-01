@@ -6,6 +6,8 @@ from __future__ import absolute_import, division, print_function
 
 import os
 
+from cryptography.hazmat.primitives import hashes
+
 import pytest
 
 from cryptography_pkcs11.backend import backend
@@ -42,7 +44,9 @@ class TestPKCS11SessionPool(object):
             )
 
     def test_failed_login(self, monkeypatch):
-        # Try to log in using a bad user type
+        """
+        Tries to log in using an invalid user type
+        """
         monkeypatch.setattr(os, "environ", {})
         with pytest.raises(PKCS11Error) as exc_info:
             PKCS11SessionPool(
@@ -51,3 +55,19 @@ class TestPKCS11SessionPool(object):
             )
 
         assert exc_info.value.args[0] == "Failed to login"
+
+    def test_destroy_session(self):
+        """
+        Inits a session for hashing, deletes the context, then immediately
+        inits another one. Due to the way session management works this will
+        give the second context the same session, which will fail with
+        CKR_OPERATION_ACTIVE and trigger the destroy codepath.
+        """
+        ctx = hashes.Hash(hashes.SHA1(), backend)
+        del(ctx)
+        ctx = hashes.Hash(hashes.SHA1(), backend)
+        ctx.update(b"test")
+        assert ctx.finalize() == (
+            b"\xa9J\x8f\xe5\xcc\xb1\x9b\xa6\x1cL\x08s\xd3\x91\xe9\x87\x98/\xbb"
+            b"\xd3"
+        )

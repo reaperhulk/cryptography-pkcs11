@@ -117,11 +117,11 @@ class PKCS11SessionPool(object):
         self._session_semaphore.release()
 
     def destroy(self, session):
-        # TODO: close the session being destroyed
+        res = self._backend._lib.C_CloseSession(session[0])
+        self._backend._check_error(res)
         session = PKCS11Session(
             self._backend, self, self._slot_id, self._flags,
             self._user_type, self._password
         )
-        self._login(session[0])
         self._session.append(session)
         self._session_semaphore.release()
