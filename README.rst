@@ -54,7 +54,7 @@ Supported Interfaces
 Issues
 ------
 
-* Session management is still pretty terrible.
+* Session management still needs improvement.
 
   * Session objects are presumed to be available to all sessions, which is
     only true if you don't close sessions.
@@ -63,9 +63,6 @@ Issues
   * Sessions that generate exceptions during an active operation are destroyed
     and a new session is opened to take their place. This is a blocking
     operation.
-  * If you destroy the session pool object it does not handle that gracefully,
-    as each session will try to call ``release``, but the object they're
-    calling is being deallocated so Bad Things occur.
 * Generating or loading a key with ``CKA_TOKEN`` True is not supported at all
   yet.
 * When adding the ``pkcs11`` entry point for multibackend it is injected as the

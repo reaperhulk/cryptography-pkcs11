@@ -4,13 +4,12 @@
 
 from __future__ import absolute_import, division, print_function
 
+import os
+
 import pytest
 
-from cryptography_pkcs11.session_pool import PKCS11SessionPool
-
-
-class DummyBackend(object):
-    pass
+from cryptography_pkcs11.backend import backend
+from cryptography_pkcs11.session_pool import PKCS11Error, PKCS11SessionPool
 
 
 class TestPKCS11SessionPool(object):
@@ -35,9 +34,20 @@ class TestPKCS11SessionPool(object):
             }
         ]
     )
-    def test_missing_init_values(self, kwargs):
-        backend = DummyBackend()
+    def test_missing_init_values_no_env_vars(self, kwargs, monkeypatch):
+        monkeypatch.setattr(os, "environ", {})
         with pytest.raises(ValueError):
             PKCS11SessionPool(
                 backend, **kwargs
             )
+
+    def test_failed_login(self, monkeypatch):
+        # Try to log in using a bad user type
+        monkeypatch.setattr(os, "environ", {})
+        with pytest.raises(PKCS11Error) as exc_info:
+            PKCS11SessionPool(
+                backend, pool_size=10, slot_id=0, flags=6,
+                user_type=3, password="wrong"
+            )
+
+        assert exc_info.value.args[0] == "Failed to login"

@@ -6,6 +6,42 @@ from __future__ import absolute_import, division, print_function
 
 import os
 import threading
+import weakref
+
+
+class PKCS11Error(Exception):
+    def __init__(self, msg, err_code):
+        super(PKCS11Error, self).__init__(msg)
+        self._err_code = err_code
+
+
+class PKCS11Session(object):
+    def __init__(self, backend, pool, slot_id, flags, user_type, password):
+        self._pool = weakref.ref(pool)
+        self._backend = backend
+        session_ptr = self._backend._ffi.new("CK_SESSION_HANDLE *")
+        res = self._backend._lib.C_OpenSession(
+            slot_id, flags, self._backend._ffi.NULL, self._backend._ffi.NULL,
+            session_ptr
+        )
+        self._backend._check_error(res)
+        self._handle = session_ptr[0]
+        res = self._backend._lib.C_Login(
+            self._handle, user_type, password, len(password)
+        )
+        # TODO: real error handling here. 0 is CKR_OK and 256 is
+        # CKR_USER_ALREADY_LOGGED_IN. SoftHSM only requires you to log in
+        # once per slot. I can't remember if that's true of Safenet, but I
+        # don't think it is.
+        if res != 0 and res != 256:
+            raise PKCS11Error("Failed to login", res)
+
+    def __del__(self):
+        if self._pool():
+            self._pool().release(self)
+
+    def __getitem__(self, idx):
+        return self._handle
 
 
 class PKCS11SessionPool(object):
@@ -25,7 +61,7 @@ class PKCS11SessionPool(object):
                 raise ValueError("flags must not be None")
 
         if user_type is None:
-            user_type = int(os.environ.get("CRYPTOGRAPHY_PKCS11_USER_TYPE"))
+            user_type = os.environ.get("CRYPTOGRAPHY_PKCS11_USER_TYPE")
             if user_type is None:
                 raise ValueError("user_type must not be None")
 
@@ -34,9 +70,12 @@ class PKCS11SessionPool(object):
             if password is None:
                 raise ValueError("password must not be None")
 
+        # We store all this so we can destroy/create new sessions.
         self._slot_id = int(slot_id)
         self._flags = int(flags)
         self._password = password
+        self._user_type = int(user_type)
+        self.pool_size = pool_size
 
         self._backend = backend
 
@@ -44,33 +83,13 @@ class PKCS11SessionPool(object):
         # if the caller runs out of sessions.
         self._session_semaphore = threading.Semaphore(pool_size)
         self._session = []
-        # TODO: set a min/max pool size. This will also need an increment size
-        for _ in range(pool_size):
-            session = self._open_session(slot_id, flags)
-            self._login(session[0], password)
+
+        for _ in range(self.pool_size):
+            session = PKCS11Session(
+                self._backend, self, self._slot_id, self._flags,
+                self._user_type, self._password
+            )
             self._session.append(session)
-
-    def _open_session(self, slot_id, flags):
-        session_ptr = self._backend._ffi.new("CK_SESSION_HANDLE *")
-        # TODO: revisit abusing cffi's gc to handle session management...
-        session_ptr = self._backend._ffi.gc(session_ptr, self.release)
-        res = self._backend._lib.C_OpenSession(
-            slot_id, flags, self._backend._ffi.NULL, self._backend._ffi.NULL,
-            session_ptr
-        )
-        self._backend._check_error(res)
-        return session_ptr
-
-    def _login(self, session, password):
-        res = self._backend._lib.C_Login(
-            session, self._backend._binding.CKU_USER, password, len(password)
-        )
-        # TODO: real error handling here. 0 is CKR_OK and 256 is
-        # CKR_USER_ALREADY_LOGGED_IN. SoftHSM only requires you to log in
-        # once per slot. I can't remember if that's true of Safenet, but I
-        # don't think it is.
-        if res != 0 and res != 256:
-            raise SystemError("Failed to login")
 
     def acquire(self):
         if not self._session_semaphore.acquire(blocking=False):
@@ -94,14 +113,15 @@ class PKCS11SessionPool(object):
         return session
 
     def release(self, session):
-        new_sess = self._backend._ffi.new("CK_SESSION_HANDLE *", session[0])
-        new_sess = self._backend._ffi.gc(new_sess, self.release)
-        self._session.append(new_sess)
+        self._session.append(session)
         self._session_semaphore.release()
 
     def destroy(self, session):
         # TODO: close the session being destroyed
-        new_session = self._open_session(self._slot_id, self._flags)
-        self._login(new_session[0], self._password)
-        self._session.append(new_session)
+        session = PKCS11Session(
+            self._backend, self, self._slot_id, self._flags,
+            self._user_type, self._password
+        )
+        self._login(session[0])
+        self._session.append(session)
         self._session_semaphore.release()
