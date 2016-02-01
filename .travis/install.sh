@@ -19,8 +19,7 @@ if [[ "$(uname -s)" == 'Darwin' ]]; then
 else
     sudo apt-add-repository -y ppa:pkg-opendnssec/ppa
     sudo apt-get update -qq
-    sudo apt-get install libenchant-dev
-    sudo apt-get install -y softhsm2
+    sudo apt-get install -y softhsm2 libenchant-dev
     pip install virtualenv
 fi
 
