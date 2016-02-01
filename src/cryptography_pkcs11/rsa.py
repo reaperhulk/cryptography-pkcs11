@@ -35,26 +35,6 @@ def _get_rsa_pss_salt_length(pss, key_size, digest_size):
         return salt
 
 
-def _check_enc_dec(padding):
-    if not isinstance(padding, AsymmetricPadding):
-        raise TypeError(
-            "Padding must be an instance of AsymmetricPadding."
-        )
-
-    if isinstance(padding, OAEP):
-        if not isinstance(padding._mgf, MGF1):
-            raise UnsupportedAlgorithm(
-                "Only MGF1 is supported by this backend.",
-                _Reasons.UNSUPPORTED_MGF
-            )
-        if not isinstance(padding._mgf._algorithm, hashes.SHA1):
-            raise UnsupportedAlgorithm(
-                "This backend supports only SHA1 inside MGF1 when "
-                "using OAEP.",
-                _Reasons.UNSUPPORTED_HASH
-            )
-
-
 @utils.register_interface(rsa.RSAPublicKeyWithSerialization)
 class _RSAPublicKey(object):
     def __init__(self, backend, handle):
@@ -265,7 +245,24 @@ def _sign_verify_init(backend, func, padding, key, algorithm):
 
 
 def _enc_dec(backend, padding, init, operation, handle, data):
-    _check_enc_dec(padding)
+    if not isinstance(padding, AsymmetricPadding):
+        raise TypeError(
+            "Padding must be an instance of AsymmetricPadding."
+        )
+
+    if isinstance(padding, OAEP):
+        if not isinstance(padding._mgf, MGF1):
+            raise UnsupportedAlgorithm(
+                "Only MGF1 is supported by this backend.",
+                _Reasons.UNSUPPORTED_MGF
+            )
+        if not isinstance(padding._mgf._algorithm, hashes.SHA1):
+            raise UnsupportedAlgorithm(
+                "This backend supports only SHA1 inside MGF1 when "
+                "using OAEP.",
+                _Reasons.UNSUPPORTED_HASH
+            )
+
     mech = backend._ffi.new("CK_MECHANISM *")
 
     if isinstance(padding, PKCS1v15):
