@@ -25,7 +25,7 @@ You'll need to set more than a few environment variables:
 * CRYPTOGRAPHY_PKCS11_USER_TYPE
 * CRYPTOGRAPHY_PKCS11_PASSWORD
 
-If you want to test this with SoftHSM you'll also need `SOFTHSM2_CONF`.
+If you want to test this with SoftHSM you'll also need ``SOFTHSM2_CONF``.
 
 Then, if all is well you can import the backend and hash a thing.
 
@@ -41,12 +41,12 @@ Supported Interfaces
 * HMACBackend (except copy)
 * RSABackend (skipped tests)
 
-  * `test_pss_minimum_key_size_for_digest` - The test uses SHA1 MGF1 and SHA512
+  * ``test_pss_minimum_key_size_for_digest`` - The test uses SHA1 MGF1 and SHA512
     hash. SoftHSM doesn't allow your MGF1 hash to not match the signing hash
     algorithm.
-  * `test_pss_verify_salt_length_too_long` - Errors during init when the test
+  * ``test_pss_verify_salt_length_too_long`` - Errors during init when the test
     expects it to error during final verification.
-  * `test_pss_signing_salt_length_too_long` - Errors during init when the test
+  * ``test_pss_signing_salt_length_too_long`` - Errors during init when the test
     expects it to error during signing.
 
 * CipherBackend (AES ECB/CBC, 3DES ECB/CBC only)
@@ -58,12 +58,15 @@ Issues
 
   * Session objects are presumed to be available to all sessions, which is
     only true if you don't close sessions.
-  * No `CKA_TOKEN` False objects are ever deleted, so device memory will run
+  * No ``CKA_TOKEN`` False objects are ever deleted, so device memory will run
     out over time if you run the test suite repeatedly.
   * Sessions that generate exceptions during an active operation are destroyed
     and a new session is opened to take their place. This is a blocking
     operation.
-* Generating or loading a key with `CKA_TOKEN` True is not supported at all
+  * If you destroy the session pool object it does not handle that gracefully,
+    as each session will try to call ``release``, but the object they're
+    calling is being deallocated so Bad Things occur.
+* Generating or loading a key with ``CKA_TOKEN`` True is not supported at all
   yet.
 * When adding the ``pkcs11`` entry point for multibackend it is injected as the
   first element in the array. This is probably not desirable.
