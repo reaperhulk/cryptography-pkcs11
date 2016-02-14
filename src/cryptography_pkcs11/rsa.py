@@ -135,6 +135,7 @@ class _RSASignatureContext(object):
         buf = self._backend._ffi.new("unsigned char[]", 256)
         buflen = self._backend._ffi.new("CK_ULONG *", 256)
         res = self._backend._lib.C_SignFinal(self._session[0], buf, buflen)
+        self._session.operation_active = False
         self._session = None
         if res != 0:
             raise ValueError("Signature failed")
@@ -172,6 +173,7 @@ class _RSAVerificationContext(object):
         res = self._backend._lib.C_VerifyFinal(
             self._session[0], buf, len(self._signature)
         )
+        self._session.operation_active = False
         self._session = None
         if res != 0:
             raise InvalidSignature
@@ -298,6 +300,7 @@ def _enc_dec(backend, padding, init, operation, handle, data):
     buf = backend._ffi.new("unsigned char[]", 256)
     buflen = backend._ffi.new("CK_ULONG *", 256)
     res = operation(session[0], data, len(data), buf, buflen)
+    session.operation_active = False
     return (res, buf, buflen)
 
 

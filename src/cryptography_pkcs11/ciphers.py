@@ -5,6 +5,7 @@
 from __future__ import absolute_import, division, print_function
 
 from cryptography import utils
+from cryptography.exceptions import UnsupportedAlgorithm, _Reasons
 from cryptography.hazmat.primitives import ciphers
 from cryptography.hazmat.primitives.ciphers import modes
 
@@ -15,6 +16,15 @@ from cryptography_pkcs11.key_handle import KeyHandle, key_handle_from_bytes
 class _CipherContext(object):
     def __init__(self, backend, cipher, mode, operation):
         self._backend = backend
+        # TODO: softhsm only supports AES/3DES with ECB/CBC
+        if not backend.cipher_supported(cipher, mode):
+            raise UnsupportedAlgorithm(
+                "cipher {0} in {1} mode is not supported "
+                "by this backend.".format(
+                    cipher.name, mode.name if mode else mode),
+                _Reasons.UNSUPPORTED_CIPHER
+            )
+
         if isinstance(cipher, KeyHandle):
             self._key_handle = cipher.key
         else:
@@ -23,9 +33,10 @@ class _CipherContext(object):
         self._cipher = cipher
         self._mode = mode
         self._operation = operation
+        self._buffer = b""
 
         if isinstance(self._cipher, ciphers.BlockCipherAlgorithm):
-            self._block_size = self._cipher.block_size
+            self._block_size = self._cipher.block_size // 8
         else:
             self._block_size = 1
 
@@ -58,19 +69,46 @@ class _CipherContext(object):
         }["{0}-{1}".format(cipher.name.lower(), mode.name.lower())]
 
     def update(self, data):
+        # Some PKCS11 implementations care deeply about having data be provided
+        # in block aligned fashion. This ugly code will buffer non-block
+        # aligned data and add it to the next update call.
+        if len(data) % self._block_size != 0 or self._buffer != b"":
+            concatenated_data = self._buffer + data
+            remainder = len(concatenated_data) % self._block_size
+            if remainder != 0:
+                self._buffer = concatenated_data[-remainder:]
+                data = concatenated_data[:-remainder]
+            else:
+                data = concatenated_data
+                self._buffer = b""
+
+        return self._raw_update(data)
+
+    def _raw_update(self, data):
         buflen = len(data) + self._block_size - 1
         buf = self._backend._ffi.new("CK_BYTE[]", buflen)
         outlen = self._backend._ffi.new("CK_ULONG *", buflen)
         res = self._operation["update"](
             self._session[0], data, len(data), buf, outlen)
+        if res == 0x21:  # CKR_DATA_LEN_RANGE. Catches non-block aligned data
+            raise ValueError(
+                "The length of the provided data is not a multiple of "
+                "the block length."
+            )
         self._backend._check_error(res)
 
         return self._backend._ffi.buffer(buf)[:outlen[0]]
 
     def finalize(self):
+        # Since we buffer update calls we need to make sure we flush the buffer
+        # before finalizing. If there's data left over and the mechanism
+        # can't handle that, well, don't do that.
+        data = self._raw_update(self._buffer)
         buf = self._backend._ffi.new("CK_BYTE[]", self._block_size)
         outlen = self._backend._ffi.new("CK_ULONG *")
         res = self._operation["final"](self._session[0], buf, outlen)
         self._backend._check_error(res)
+        self._session.operation_active = False
+        self._session = None
 
-        return self._backend._ffi.buffer(buf)[:outlen[0]]
+        return data + self._backend._ffi.buffer(buf)[:outlen[0]]

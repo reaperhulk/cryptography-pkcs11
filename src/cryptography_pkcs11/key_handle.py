@@ -67,7 +67,6 @@ def key_handle_from_attributes(attributes, backend):
 # TODO: this doesn't error when passing invalid key sizes for AES.
 # TODO: handle other key types.
 def key_handle_from_bytes(data, backend):
-    session = backend._session_pool.acquire()
     attrs = build_attributes([
         (backend._binding.CKA_CLASS, backend._binding.CKO_SECRET_KEY),
         (backend._binding.CKA_KEY_TYPE, backend._binding.CKK_AES),
@@ -77,24 +76,24 @@ def key_handle_from_bytes(data, backend):
         (backend._binding.CKA_DECRYPT, True),
     ], backend)
     object_handle = backend._ffi.new("CK_OBJECT_HANDLE *")
-    res = backend._lib.C_CreateObject(
-        session[0], attrs.template, len(attrs.template), object_handle
+    session = backend._session_pool.acquire_and_init(
+        backend, backend._lib.C_CreateObject, attrs.template,
+        len(attrs.template), object_handle
     )
-    backend._check_error(res)
-    return KeyHandle(object_handle[0], backend)
+    return KeyHandle(object_handle[0], session, backend)
 
 
 class KeyHandle(object):
-    def __init__(self, handle, backend):
+    def __init__(self, handle, session, backend):
         self._handle = handle
         self._backend = backend
-        session = backend._session_pool.acquire()
+        self._session = session
         length = backend._ffi.new("CK_ULONG *")
         attrs = build_attributes([
             (backend._binding.CKA_VALUE_LEN, length),
         ], backend)
         res = backend._lib.C_GetAttributeValue(
-            session[0], self._handle, attrs.template, len(attrs.template)
+            self._session[0], self._handle, attrs.template, len(attrs.template)
         )
         backend._check_error(res)
         self._length = length[0]

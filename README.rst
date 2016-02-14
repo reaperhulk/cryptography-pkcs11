@@ -27,7 +27,8 @@ You'll need to set more than a few environment variables:
 
 If you want to test this with SoftHSM you'll also need ``SOFTHSM2_CONF``.
 
-Then, if all is well you can import the backend and hash a thing.
+Then, if all is well you can import the backend and use hashing, HMAC,
+some limited ciphers, and RSA functions from `cryptography`_.
 
 .. code-block:: pycon
 
@@ -56,6 +57,8 @@ Issues
 
 * Session management still needs improvement.
 
+  * Acquire and init acquires a session, inits it for the operation, and sets
+    ``operation_active``. However, there is no ``finalize_and_release`` yet.
   * Session objects are presumed to be available to all sessions, which is
     only true if you don't close sessions.
   * No ``CKA_TOKEN`` False objects are ever deleted, so device memory will run
@@ -66,6 +69,7 @@ Issues
 * Generating or loading a key with ``CKA_TOKEN`` True is not supported at all
   yet.
 * When adding the ``pkcs11`` entry point for multibackend it is injected as the
-  first element in the array. This is probably not desirable.
+  first element in the array. This is probably not desirable. Of course it
+  turns out in Python 3 entry points are not ordered so...
 
 .. _`cryptography`: https://cryptography.io/

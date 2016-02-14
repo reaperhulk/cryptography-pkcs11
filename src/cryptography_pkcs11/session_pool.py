@@ -31,6 +31,7 @@ class PKCS11Session(object):
         res = self._backend._lib.C_Login(
             self._handle, user_type, password, len(password)
         )
+        self.operation_active = False
         # TODO: real error handling here. 0 is CKR_OK and 256 is
         # CKR_USER_ALREADY_LOGGED_IN. SoftHSM only requires you to log in
         # once per slot. I can't remember if that's true of Safenet, but I
@@ -38,9 +39,12 @@ class PKCS11Session(object):
         if res != 0 and res != 256:
             raise PKCS11Error("Failed to login", res)
 
-    def __del__(self):
+    def release(self):
         if self._pool():
             self._pool().release(self)
+
+    def __del__(self):
+        self.release()
 
     def __getitem__(self, idx):
         return self._handle
@@ -105,6 +109,7 @@ class PKCS11SessionPool(object):
 
     def acquire_and_init(self, backend, func, *args):
         session = self.acquire()
+        session.operation_active = True
         res = func(session[0], *args)
         if res == 0x90:  # CKR_OPERATION_ACTIVE
             self.destroy(session)
@@ -115,8 +120,11 @@ class PKCS11SessionPool(object):
         return session
 
     def release(self, session):
-        self._session.append(session)
-        self._session_semaphore.release()
+        if session.operation_active:
+            self.destroy(session)
+        else:
+            self._session.append(session)
+            self._session_semaphore.release()
 
     def destroy(self, session):
         # _pool is a weakref back to this object. In __del__ we check to
@@ -124,6 +132,9 @@ class PKCS11SessionPool(object):
         # isn't. Using a lambda here makes that return None and avoids
         # releasing the session we want to destroy back into the pool.
         session._pool = lambda: None
+        # TODO: closing a session means that a key handle opened with it will
+        # become invalid. For now we'll just not do that, but this is not a
+        # long term solution.
         self._backend._lib.C_CloseSession(session[0])
         new_session = PKCS11Session(
             self._backend, self, self._slot_id, self._flags,
